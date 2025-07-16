@@ -17,9 +17,9 @@ const envSettings = environments[environment] || {
   alertEmail: undefined,
 };
 
-// Environment configuration
+// Environment configuration - make it optional for synthesis
 const envConfig = {
-  account: envSettings.account || process.env.CDK_DEFAULT_ACCOUNT,
+  account: envSettings.account || process.env.CDK_DEFAULT_ACCOUNT || undefined,
   region: envSettings.region || process.env.CDK_DEFAULT_REGION || "us-east-1",
 };
 

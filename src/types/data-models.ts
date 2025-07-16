@@ -143,6 +143,8 @@ export interface S3FileReference {
   url?: string;
   contentType?: string;
   size?: number;
+  etag?: string;
+  versionId?: string;
 }
 
 // Lambda Event Types

@@ -19,19 +19,13 @@
   "context": {
     "environments": {
       "dev": {
-        "account": "${CDK_DEFAULT_ACCOUNT}",
-        "region": "${CDK_DEFAULT_REGION}",
-        "alertEmail": "${DEV_ALERT_EMAIL}"
+        "region": "us-east-1"
       },
       "staging": {
-        "account": "${STAGING_ACCOUNT}",
-        "region": "${STAGING_REGION}",
-        "alertEmail": "${STAGING_ALERT_EMAIL}"
+        "region": "us-east-1"
       },
       "prod": {
-        "account": "${PROD_ACCOUNT}",
-        "region": "${PROD_REGION}",
-        "alertEmail": "${PROD_ALERT_EMAIL}"
+        "region": "us-east-1"
       }
     },
     "@aws-cdk/aws-lambda:recognizeLayerVersion": true,
