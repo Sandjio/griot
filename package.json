@@ -21,6 +21,7 @@
   },
   "homepage": "https://github.com/Sandjio/griot#readme",
   "devDependencies": {
+    "@types/aws-lambda": "^8.10.150",
     "@types/jest": "^30.0.0",
     "@types/node": "^24.0.14",
     "aws-sdk-client-mock": "^4.1.0",
