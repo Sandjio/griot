@@ -17,6 +17,23 @@
     ]
   },
   "context": {
+    "environments": {
+      "dev": {
+        "account": "${CDK_DEFAULT_ACCOUNT}",
+        "region": "${CDK_DEFAULT_REGION}",
+        "alertEmail": "${DEV_ALERT_EMAIL}"
+      },
+      "staging": {
+        "account": "${STAGING_ACCOUNT}",
+        "region": "${STAGING_REGION}",
+        "alertEmail": "${STAGING_ALERT_EMAIL}"
+      },
+      "prod": {
+        "account": "${PROD_ACCOUNT}",
+        "region": "${PROD_REGION}",
+        "alertEmail": "${PROD_ALERT_EMAIL}"
+      }
+    },
     "@aws-cdk/aws-lambda:recognizeLayerVersion": true,
     "@aws-cdk/core:checkSecretUsage": true,
     "@aws-cdk/core:target-partitions": [
