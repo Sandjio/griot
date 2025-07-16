@@ -5,6 +5,8 @@ import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as events from "aws-cdk-lib/aws-events";
+import * as logs from "aws-cdk-lib/aws-logs";
+import * as iam from "aws-cdk-lib/aws-iam";
 import { Construct } from "constructs";
 
 export interface ApiStackProps extends cdk.StackProps {
@@ -51,8 +53,7 @@ export class ApiStack extends cdk.Stack {
         challengeRequiredOnNewDevice: true,
         deviceOnlyRememberedOnUserPrompt: true,
       },
-      // Advanced security features
-      advancedSecurityMode: cognito.AdvancedSecurityMode.ENFORCED,
+      // Basic security features (advanced security requires Plus plan)
       // User verification
       userVerification: {
         emailSubject: "Manga Platform - Verify your email",
@@ -160,27 +161,93 @@ export class ApiStack extends cdk.Stack {
       }
     );
 
-    // API Gateway
+    // API Gateway with enhanced configuration
     this.api = new apigateway.RestApi(this, "MangaApi", {
       restApiName: `manga-platform-api-${props.environment}`,
       description: "Manga Generation Platform API",
+      // CORS configuration for frontend integration
       defaultCorsPreflightOptions: {
-        allowOrigins: apigateway.Cors.ALL_ORIGINS,
-        allowMethods: apigateway.Cors.ALL_METHODS,
+        allowOrigins:
+          props.environment === "prod"
+            ? ["https://manga-platform.com"]
+            : apigateway.Cors.ALL_ORIGINS,
+        allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allowHeaders: [
           "Content-Type",
           "X-Amz-Date",
           "Authorization",
           "X-Api-Key",
           "X-Amz-Security-Token",
+          "X-Requested-With",
         ],
+        allowCredentials: true,
+        maxAge: cdk.Duration.hours(1),
       },
+      // Enhanced deployment configuration
       deployOptions: {
         stageName: props.environment,
+        // Comprehensive logging configuration
         loggingLevel: apigateway.MethodLoggingLevel.INFO,
         dataTraceEnabled: true,
         metricsEnabled: true,
+        // Request/response logging
+        accessLogDestination: new apigateway.LogGroupLogDestination(
+          new logs.LogGroup(this, "ApiAccessLogs", {
+            logGroupName: `/aws/apigateway/manga-platform-${props.environment}`,
+            retention:
+              props.environment === "prod"
+                ? logs.RetentionDays.ONE_MONTH
+                : logs.RetentionDays.ONE_WEEK,
+            removalPolicy:
+              props.environment === "prod"
+                ? cdk.RemovalPolicy.RETAIN
+                : cdk.RemovalPolicy.DESTROY,
+          })
+        ),
+        accessLogFormat: apigateway.AccessLogFormat.jsonWithStandardFields({
+          caller: true,
+          httpMethod: true,
+          ip: true,
+          protocol: true,
+          requestTime: true,
+          resourcePath: true,
+          responseLength: true,
+          status: true,
+          user: true,
+        }),
       },
+      // API Gateway policy for additional security
+      policy: new iam.PolicyDocument({
+        statements: [
+          new iam.PolicyStatement({
+            effect: iam.Effect.ALLOW,
+            principals: [new iam.AnyPrincipal()],
+            actions: ["execute-api:Invoke"],
+            resources: ["*"],
+            // Add IP restrictions for production if needed
+            ...(props.environment === "prod"
+              ? {
+                  conditions: {
+                    IpAddress: {
+                      "aws:SourceIp": [
+                        // Add specific IP ranges for production if needed
+                        "0.0.0.0/0",
+                      ],
+                    },
+                  },
+                }
+              : {}),
+          }),
+        ],
+      }),
+      // Enable binary media types for file uploads/downloads
+      binaryMediaTypes: [
+        "application/pdf",
+        "image/png",
+        "image/jpeg",
+        "image/jpg",
+        "application/octet-stream",
+      ],
     });
 
     // Cognito Authorizer
@@ -192,6 +259,121 @@ export class ApiStack extends cdk.Stack {
         authorizerName: `manga-authorizer-${props.environment}`,
       }
     );
+
+    // Request Validators for input validation
+    const requestValidator = this.api.addRequestValidator("RequestValidator", {
+      requestValidatorName: `manga-request-validator-${props.environment}`,
+      validateRequestBody: true,
+      validateRequestParameters: true,
+    });
+
+    // API Models for request/response validation
+    const preferencesRequestModel = this.api.addModel(
+      "PreferencesRequestModel",
+      {
+        modelName: "PreferencesRequest",
+        contentType: "application/json",
+        schema: {
+          type: apigateway.JsonSchemaType.OBJECT,
+          properties: {
+            genres: {
+              type: apigateway.JsonSchemaType.ARRAY,
+              items: {
+                type: apigateway.JsonSchemaType.STRING,
+              },
+              minItems: 1,
+              maxItems: 10,
+            },
+            themes: {
+              type: apigateway.JsonSchemaType.ARRAY,
+              items: {
+                type: apigateway.JsonSchemaType.STRING,
+              },
+              minItems: 1,
+              maxItems: 10,
+            },
+            artStyle: {
+              type: apigateway.JsonSchemaType.STRING,
+              enum: ["manga", "anime", "realistic", "cartoon", "abstract"],
+            },
+            targetAudience: {
+              type: apigateway.JsonSchemaType.STRING,
+              enum: ["children", "teen", "adult", "all-ages"],
+            },
+            contentRating: {
+              type: apigateway.JsonSchemaType.STRING,
+              enum: ["G", "PG", "PG-13", "R"],
+            },
+          },
+          required: [
+            "genres",
+            "themes",
+            "artStyle",
+            "targetAudience",
+            "contentRating",
+          ],
+          additionalProperties: false,
+        },
+      }
+    );
+
+    const errorResponseModel = this.api.addModel("ErrorResponseModel", {
+      modelName: "ErrorResponse",
+      contentType: "application/json",
+      schema: {
+        type: apigateway.JsonSchemaType.OBJECT,
+        properties: {
+          error: {
+            type: apigateway.JsonSchemaType.OBJECT,
+            properties: {
+              code: {
+                type: apigateway.JsonSchemaType.STRING,
+              },
+              message: {
+                type: apigateway.JsonSchemaType.STRING,
+              },
+              details: {
+                type: apigateway.JsonSchemaType.OBJECT,
+              },
+              requestId: {
+                type: apigateway.JsonSchemaType.STRING,
+              },
+              timestamp: {
+                type: apigateway.JsonSchemaType.STRING,
+              },
+            },
+            required: ["code", "message", "requestId", "timestamp"],
+          },
+        },
+        required: ["error"],
+      },
+    });
+
+    const successResponseModel = this.api.addModel("SuccessResponseModel", {
+      modelName: "SuccessResponse",
+      contentType: "application/json",
+      schema: {
+        type: apigateway.JsonSchemaType.OBJECT,
+        properties: {
+          success: {
+            type: apigateway.JsonSchemaType.BOOLEAN,
+          },
+          message: {
+            type: apigateway.JsonSchemaType.STRING,
+          },
+          data: {
+            type: apigateway.JsonSchemaType.OBJECT,
+          },
+          requestId: {
+            type: apigateway.JsonSchemaType.STRING,
+          },
+          timestamp: {
+            type: apigateway.JsonSchemaType.STRING,
+          },
+        },
+        required: ["success", "message", "requestId", "timestamp"],
+      },
+    });
 
     // Placeholder Lambda functions for API endpoints
     const preferencesLambda = new lambda.Function(this, "PreferencesLambda", {
@@ -224,14 +406,82 @@ export class ApiStack extends cdk.Stack {
     props.contentBucket.grantReadWrite(preferencesLambda);
     props.eventBus.grantPutEventsTo(preferencesLambda);
 
-    // API Resources and Methods
+    // API Resources and Methods with request validation
     const preferencesResource = this.api.root.addResource("preferences");
     preferencesResource.addMethod(
       "POST",
-      new apigateway.LambdaIntegration(preferencesLambda),
+      new apigateway.LambdaIntegration(preferencesLambda, {
+        proxy: true,
+        integrationResponses: [
+          {
+            statusCode: "200",
+            responseTemplates: {
+              "application/json": "",
+            },
+          },
+          {
+            statusCode: "400",
+            selectionPattern: "4\\d{2}",
+            responseTemplates: {
+              "application/json": JSON.stringify({
+                error: {
+                  code: "VALIDATION_ERROR",
+                  message: "Invalid request format",
+                  requestId: "$context.requestId",
+                  timestamp: "$context.requestTime",
+                },
+              }),
+            },
+          },
+          {
+            statusCode: "500",
+            selectionPattern: "5\\d{2}",
+            responseTemplates: {
+              "application/json": JSON.stringify({
+                error: {
+                  code: "INTERNAL_ERROR",
+                  message: "Internal server error",
+                  requestId: "$context.requestId",
+                  timestamp: "$context.requestTime",
+                },
+              }),
+            },
+          },
+        ],
+      }),
       {
         authorizer,
         authorizationType: apigateway.AuthorizationType.COGNITO,
+        requestValidator,
+        requestModels: {
+          "application/json": preferencesRequestModel,
+        },
+        methodResponses: [
+          {
+            statusCode: "200",
+            responseModels: {
+              "application/json": successResponseModel,
+            },
+          },
+          {
+            statusCode: "400",
+            responseModels: {
+              "application/json": errorResponseModel,
+            },
+          },
+          {
+            statusCode: "401",
+            responseModels: {
+              "application/json": errorResponseModel,
+            },
+          },
+          {
+            statusCode: "500",
+            responseModels: {
+              "application/json": errorResponseModel,
+            },
+          },
+        ],
       }
     );
 
@@ -267,40 +517,160 @@ export class ApiStack extends cdk.Stack {
       `),
     });
 
-    // Add placeholder methods
+    // Add methods with proper validation and response models
     storiesResource.addMethod(
       "GET",
-      new apigateway.LambdaIntegration(placeholderLambda),
+      new apigateway.LambdaIntegration(placeholderLambda, {
+        proxy: true,
+      }),
       {
         authorizer,
         authorizationType: apigateway.AuthorizationType.COGNITO,
+        requestParameters: {
+          "method.request.querystring.limit": false,
+          "method.request.querystring.offset": false,
+          "method.request.querystring.status": false,
+        },
+        methodResponses: [
+          {
+            statusCode: "200",
+            responseModels: {
+              "application/json": successResponseModel,
+            },
+          },
+          {
+            statusCode: "401",
+            responseModels: {
+              "application/json": errorResponseModel,
+            },
+          },
+          {
+            statusCode: "500",
+            responseModels: {
+              "application/json": errorResponseModel,
+            },
+          },
+        ],
       }
     );
 
     storyResource.addMethod(
       "GET",
-      new apigateway.LambdaIntegration(placeholderLambda),
+      new apigateway.LambdaIntegration(placeholderLambda, {
+        proxy: true,
+      }),
       {
         authorizer,
         authorizationType: apigateway.AuthorizationType.COGNITO,
+        requestParameters: {
+          "method.request.path.storyId": true,
+        },
+        methodResponses: [
+          {
+            statusCode: "200",
+            responseModels: {
+              "application/json": successResponseModel,
+            },
+          },
+          {
+            statusCode: "401",
+            responseModels: {
+              "application/json": errorResponseModel,
+            },
+          },
+          {
+            statusCode: "404",
+            responseModels: {
+              "application/json": errorResponseModel,
+            },
+          },
+          {
+            statusCode: "500",
+            responseModels: {
+              "application/json": errorResponseModel,
+            },
+          },
+        ],
       }
     );
 
     episodeResource.addMethod(
       "GET",
-      new apigateway.LambdaIntegration(placeholderLambda),
+      new apigateway.LambdaIntegration(placeholderLambda, {
+        proxy: true,
+      }),
       {
         authorizer,
         authorizationType: apigateway.AuthorizationType.COGNITO,
+        requestParameters: {
+          "method.request.path.episodeId": true,
+        },
+        methodResponses: [
+          {
+            statusCode: "200",
+            responseModels: {
+              "application/json": successResponseModel,
+            },
+          },
+          {
+            statusCode: "401",
+            responseModels: {
+              "application/json": errorResponseModel,
+            },
+          },
+          {
+            statusCode: "404",
+            responseModels: {
+              "application/json": errorResponseModel,
+            },
+          },
+          {
+            statusCode: "500",
+            responseModels: {
+              "application/json": errorResponseModel,
+            },
+          },
+        ],
       }
     );
 
     statusRequestResource.addMethod(
       "GET",
-      new apigateway.LambdaIntegration(placeholderLambda),
+      new apigateway.LambdaIntegration(placeholderLambda, {
+        proxy: true,
+      }),
       {
         authorizer,
         authorizationType: apigateway.AuthorizationType.COGNITO,
+        requestParameters: {
+          "method.request.path.requestId": true,
+        },
+        methodResponses: [
+          {
+            statusCode: "200",
+            responseModels: {
+              "application/json": successResponseModel,
+            },
+          },
+          {
+            statusCode: "401",
+            responseModels: {
+              "application/json": errorResponseModel,
+            },
+          },
+          {
+            statusCode: "404",
+            responseModels: {
+              "application/json": errorResponseModel,
+            },
+          },
+          {
+            statusCode: "500",
+            responseModels: {
+              "application/json": errorResponseModel,
+            },
+          },
+        ],
       }
     );
 

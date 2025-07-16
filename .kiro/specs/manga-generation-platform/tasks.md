@@ -55,7 +55,7 @@
   - Write unit tests for user profile creation and validation
   - _Requirements: 1.2, 1.3, 1.5, 8.2_
 
-- [ ] 8. Create API Gateway REST API infrastructure
+- [x] 8. Create API Gateway REST API infrastructure
 
   - Implement CDK construct for API Gateway with Cognito authorizer
   - Configure CORS settings and request validation
