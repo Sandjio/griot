@@ -31,7 +31,7 @@
   - Set up CORS and access policies for content delivery
   - _Requirements: 3.4, 4.4, 5.5, 9.3_
 
-- [ ] 5. Implement EventBridge custom bus and event handling
+- [x] 5. Implement EventBridge custom bus and event handling
 
   - Create CDK construct for EventBridge custom bus
   - Define event rules and targets for each Lambda function

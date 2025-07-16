@@ -4,6 +4,7 @@ import * as s3 from "aws-cdk-lib/aws-s3";
 import * as events from "aws-cdk-lib/aws-events";
 import * as iam from "aws-cdk-lib/aws-iam";
 import { Construct } from "constructs";
+import { EventBridgeConstruct } from "../constructs/eventbridge-construct";
 
 export interface CoreInfrastructureStackProps extends cdk.StackProps {
   environment: string;
@@ -13,6 +14,7 @@ export class CoreInfrastructureStack extends cdk.Stack {
   public readonly mangaTable: dynamodb.Table;
   public readonly contentBucket: s3.Bucket;
   public readonly eventBus: events.EventBus;
+  public readonly eventBridgeConstruct: EventBridgeConstruct;
   public readonly s3AccessPolicy: iam.PolicyStatement;
 
   constructor(
@@ -147,6 +149,16 @@ export class CoreInfrastructureStack extends cdk.Stack {
     this.eventBus = new events.EventBus(this, "MangaEventBus", {
       eventBusName: `manga-platform-events-${props.environment}`,
     });
+
+    // EventBridge Construct with rules, targets, and DLQs
+    this.eventBridgeConstruct = new EventBridgeConstruct(
+      this,
+      "EventBridgeConstruct",
+      {
+        eventBus: this.eventBus,
+        environment: props.environment,
+      }
+    );
 
     // S3 Access Policy for Lambda functions
     this.s3AccessPolicy = new iam.PolicyStatement({
