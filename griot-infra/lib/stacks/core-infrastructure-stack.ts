@@ -36,10 +36,12 @@ export class CoreInfrastructureStack extends cdk.Stack {
       pointInTimeRecoverySpecification: {
         pointInTimeRecoveryEnabled: true,
       },
+      deletionProtection: props.environment === "prod",
       removalPolicy:
         props.environment === "prod"
           ? cdk.RemovalPolicy.RETAIN
           : cdk.RemovalPolicy.DESTROY,
+      stream: dynamodb.StreamViewType.NEW_AND_OLD_IMAGES,
     });
 
     // Global Secondary Index 1 - Alternative access patterns
