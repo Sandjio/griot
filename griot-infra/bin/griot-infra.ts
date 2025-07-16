@@ -1,20 +1,72 @@
 #!/usr/bin/env node
-import * as cdk from 'aws-cdk-lib';
-import { GriotInfraStack } from '../lib/griot-infra-stack';
+import * as cdk from "aws-cdk-lib";
+import { CoreInfrastructureStack } from "../lib/stacks/core-infrastructure-stack";
+import { ApiStack } from "../lib/stacks/api-stack";
+import { MonitoringStack } from "../lib/stacks/monitoring-stack";
 
 const app = new cdk.App();
-new GriotInfraStack(app, 'GriotInfraStack', {
-  /* If you don't specify 'env', this stack will be environment-agnostic.
-   * Account/Region-dependent features and context lookups will not work,
-   * but a single synthesized template can be deployed anywhere. */
 
-  /* Uncomment the next line to specialize this stack for the AWS Account
-   * and Region that are implied by the current CLI configuration. */
-  // env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: process.env.CDK_DEFAULT_REGION },
+// Get environment from context or default to 'dev'
+const environment = app.node.tryGetContext("environment") || "dev";
 
-  /* Uncomment the next line if you know exactly what Account and Region you
-   * want to deploy the stack to. */
-  // env: { account: '123456789012', region: 'us-east-1' },
+// Get environment-specific configuration
+const environments = app.node.tryGetContext("environments") || {};
+const envSettings = environments[environment] || {
+  account: process.env.CDK_DEFAULT_ACCOUNT,
+  region: process.env.CDK_DEFAULT_REGION || "us-east-1",
+  alertEmail: undefined,
+};
 
-  /* For more information, see https://docs.aws.amazon.com/cdk/latest/guide/environments.html */
+// Environment configuration
+const envConfig = {
+  account: envSettings.account || process.env.CDK_DEFAULT_ACCOUNT,
+  region: envSettings.region || process.env.CDK_DEFAULT_REGION || "us-east-1",
+};
+
+const alertEmail = envSettings.alertEmail;
+
+// Core Infrastructure Stack
+const coreStack = new CoreInfrastructureStack(
+  app,
+  `MangaCoreStack-${environment}`,
+  {
+    environment,
+    env: envConfig,
+    description: `Manga Platform Core Infrastructure - ${environment}`,
+  }
+);
+
+// API Stack
+const apiStack = new ApiStack(app, `MangaApiStack-${environment}`, {
+  environment,
+  mangaTable: coreStack.mangaTable,
+  contentBucket: coreStack.contentBucket,
+  eventBus: coreStack.eventBus,
+  env: envConfig,
+  description: `Manga Platform API - ${environment}`,
 });
+
+// Monitoring Stack
+const monitoringStack = new MonitoringStack(
+  app,
+  `MangaMonitoringStack-${environment}`,
+  {
+    environment,
+    mangaTable: coreStack.mangaTable,
+    contentBucket: coreStack.contentBucket,
+    api: apiStack.api,
+    alertEmail,
+    env: envConfig,
+    description: `Manga Platform Monitoring - ${environment}`,
+  }
+);
+
+// Add dependencies
+apiStack.addDependency(coreStack);
+monitoringStack.addDependency(coreStack);
+monitoringStack.addDependency(apiStack);
+
+// Tags for all stacks
+cdk.Tags.of(app).add("Project", "MangaPlatform");
+cdk.Tags.of(app).add("Environment", environment);
+cdk.Tags.of(app).add("ManagedBy", "CDK");
