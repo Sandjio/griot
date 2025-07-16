@@ -101,6 +101,7 @@ export class UserProfileAccess {
 // User Preferences Operations
 export class UserPreferencesAccess {
   static async create(
+    userId: string,
     preferences: Omit<
       UserPreferences,
       "PK" | "SK" | "GSI1PK" | "GSI1SK" | "createdAt"
@@ -110,9 +111,9 @@ export class UserPreferencesAccess {
     const command = new PutCommand({
       TableName: TABLE_NAME,
       Item: {
-        PK: `USER#${preferences.preferences}` as const,
+        PK: `USER#${userId}` as const,
         SK: `PREFERENCES#${timestamp}` as const,
-        GSI1PK: `USER#${preferences.preferences}` as const,
+        GSI1PK: `USER#${userId}` as const,
         GSI1SK: `PREFERENCES#${timestamp}` as const,
         ...preferences,
         createdAt: timestamp,
