@@ -24,7 +24,7 @@ export class CoreInfrastructureStack extends cdk.Stack {
   ) {
     super(scope, id, props);
 
-    // DynamoDB Single Table Design
+    // DynamoDB Single Table Design with enhanced encryption
     this.mangaTable = new dynamodb.Table(this, "MangaPlatformTable", {
       tableName: `manga-platform-table-${props.environment}`,
       partitionKey: {
@@ -36,7 +36,11 @@ export class CoreInfrastructureStack extends cdk.Stack {
         type: dynamodb.AttributeType.STRING,
       },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      encryption: dynamodb.TableEncryption.AWS_MANAGED,
+      // Enhanced encryption configuration
+      encryption:
+        props.environment === "prod"
+          ? dynamodb.TableEncryption.CUSTOMER_MANAGED
+          : dynamodb.TableEncryption.AWS_MANAGED,
       pointInTimeRecoverySpecification: {
         pointInTimeRecoveryEnabled: true,
       },
@@ -46,6 +50,10 @@ export class CoreInfrastructureStack extends cdk.Stack {
           ? cdk.RemovalPolicy.RETAIN
           : cdk.RemovalPolicy.DESTROY,
       stream: dynamodb.StreamViewType.NEW_AND_OLD_IMAGES,
+      // Additional security configurations
+      contributorInsightsSpecification: {
+        enabled: props.environment === "prod",
+      },
     });
 
     // Global Secondary Index 1 - Alternative access patterns
@@ -74,12 +82,19 @@ export class CoreInfrastructureStack extends cdk.Stack {
       },
     });
 
-    // S3 Bucket for content storage with enhanced configuration
+    // S3 Bucket for content storage with enhanced encryption and security
     this.contentBucket = new s3.Bucket(this, "ContentBucket", {
       bucketName: `manga-platform-content-${props.environment}`,
-      encryption: s3.BucketEncryption.S3_MANAGED,
+      // Enhanced encryption configuration
+      encryption:
+        props.environment === "prod"
+          ? s3.BucketEncryption.KMS_MANAGED
+          : s3.BucketEncryption.S3_MANAGED,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       versioned: true,
+      // Enhanced security configurations
+      enforceSSL: true,
+      minimumTLSVersion: 1.2,
       cors: [
         {
           allowedMethods: [

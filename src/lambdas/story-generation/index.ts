@@ -23,7 +23,7 @@ import {
 } from "../../utils/cloudwatch-metrics";
 
 // Enable X-Ray tracing for AWS SDK
-const AWS = AWSXRay.captureAWS(require("aws-sdk"));
+// Note: AWS SDK v3 doesn't require explicit capturing for X-Ray
 
 /**
  * Story Generation Lambda Function

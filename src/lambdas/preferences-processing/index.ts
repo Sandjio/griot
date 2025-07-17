@@ -20,9 +20,16 @@ import {
   PerformanceTimer,
   METRIC_NAMESPACES,
 } from "../../utils/cloudwatch-metrics";
+import {
+  InputValidator,
+  validateApiGatewayEvent,
+  PREFERENCES_VALIDATION_RULES,
+  RateLimiter,
+  SECURITY_HEADERS,
+} from "../../utils/input-validation";
 
 // Enable X-Ray tracing for AWS SDK
-const AWS = AWSXRay.captureAWS(require("aws-sdk"));
+// Note: AWS SDK v3 doesn't require explicit capturing for X-Ray
 
 /**
  * Preferences Processing Lambda Function
@@ -68,12 +75,70 @@ const preferencesProcessingHandler = async (
   );
 
   try {
+    // Validate API Gateway event for security
+    const eventValidation = validateApiGatewayEvent(event);
+    if (!eventValidation.isValid) {
+      subsegment?.addError(
+        new Error(
+          `Event validation failed: ${eventValidation.errors.join(", ")}`
+        )
+      );
+      subsegment?.close();
+      return {
+        statusCode: 400,
+        headers: SECURITY_HEADERS,
+        body: JSON.stringify({
+          error: {
+            code: "INVALID_REQUEST",
+            message: "Request validation failed",
+            requestId: event.requestContext.requestId,
+            timestamp: new Date().toISOString(),
+          },
+        }),
+      };
+    }
+
     // Extract user ID from Cognito claims
     const userId = event.requestContext.authorizer?.claims?.sub;
     if (!userId) {
       subsegment?.addError(new Error("User not authenticated"));
       subsegment?.close();
-      return createErrorResponse(401, "UNAUTHORIZED", "User not authenticated");
+      return {
+        statusCode: 401,
+        headers: SECURITY_HEADERS,
+        body: JSON.stringify({
+          error: {
+            code: "UNAUTHORIZED",
+            message: "User not authenticated",
+            requestId: event.requestContext.requestId,
+            timestamp: new Date().toISOString(),
+          },
+        }),
+      };
+    }
+
+    // Rate limiting check
+    const clientIp = event.requestContext.identity?.sourceIp || "unknown";
+    const rateLimitKey = `${userId}-${clientIp}`;
+    if (!RateLimiter.isAllowed(rateLimitKey, 10, 60000)) {
+      // 10 requests per minute
+      subsegment?.addError(new Error("Rate limit exceeded"));
+      subsegment?.close();
+      return {
+        statusCode: 429,
+        headers: {
+          ...SECURITY_HEADERS,
+          "Retry-After": "60",
+        },
+        body: JSON.stringify({
+          error: {
+            code: "RATE_LIMIT_EXCEEDED",
+            message: "Too many requests. Please try again later.",
+            requestId: event.requestContext.requestId,
+            timestamp: new Date().toISOString(),
+          },
+        }),
+      };
     }
 
     // Add user context to X-Ray
@@ -82,17 +147,25 @@ const preferencesProcessingHandler = async (
       httpMethod: event.httpMethod,
       path: event.path,
       userAgent: event.headers["User-Agent"],
+      clientIp,
     });
 
     // Parse and validate request body
     if (!event.body) {
       subsegment?.addError(new Error("Request body is required"));
       subsegment?.close();
-      return createErrorResponse(
-        400,
-        "INVALID_REQUEST",
-        "Request body is required"
-      );
+      return {
+        statusCode: 400,
+        headers: SECURITY_HEADERS,
+        body: JSON.stringify({
+          error: {
+            code: "INVALID_REQUEST",
+            message: "Request body is required",
+            requestId: event.requestContext.requestId,
+            timestamp: new Date().toISOString(),
+          },
+        }),
+      };
     }
 
     let preferences: UserPreferencesData;
@@ -103,26 +176,68 @@ const preferencesProcessingHandler = async (
         error instanceof Error ? error : new Error(String(error))
       );
       subsegment?.close();
-      return createErrorResponse(
-        400,
-        "INVALID_JSON",
-        "Invalid JSON in request body"
-      );
+      return {
+        statusCode: 400,
+        headers: SECURITY_HEADERS,
+        body: JSON.stringify({
+          error: {
+            code: "INVALID_JSON",
+            message: "Invalid JSON in request body",
+            requestId: event.requestContext.requestId,
+            timestamp: new Date().toISOString(),
+          },
+        }),
+      };
     }
 
-    // Validate preferences data
-    const validationResult = validatePreferences(preferences);
-    if (!validationResult.isValid) {
+    // Enhanced input validation and sanitization
+    const inputValidation = InputValidator.validate(
+      preferences,
+      PREFERENCES_VALIDATION_RULES
+    );
+    if (!inputValidation.isValid) {
       const validationError = new Error(
-        `Validation failed: ${validationResult.errors.join(", ")}`
+        `Input validation failed: ${inputValidation.errors.join(", ")}`
       );
       subsegment?.addError(validationError);
       subsegment?.close();
-      return createErrorResponse(
-        400,
-        "VALIDATION_ERROR",
-        validationResult.errors.join(", ")
+      return {
+        statusCode: 400,
+        headers: SECURITY_HEADERS,
+        body: JSON.stringify({
+          error: {
+            code: "VALIDATION_ERROR",
+            message: inputValidation.errors.join(", "),
+            requestId: event.requestContext.requestId,
+            timestamp: new Date().toISOString(),
+          },
+        }),
+      };
+    }
+
+    // Use sanitized data
+    preferences = inputValidation.sanitizedData as UserPreferencesData;
+
+    // Additional legacy validation for backward compatibility
+    const legacyValidationResult = validatePreferences(preferences);
+    if (!legacyValidationResult.isValid) {
+      const validationError = new Error(
+        `Legacy validation failed: ${legacyValidationResult.errors.join(", ")}`
       );
+      subsegment?.addError(validationError);
+      subsegment?.close();
+      return {
+        statusCode: 400,
+        headers: SECURITY_HEADERS,
+        body: JSON.stringify({
+          error: {
+            code: "VALIDATION_ERROR",
+            message: legacyValidationResult.errors.join(", "),
+            requestId: event.requestContext.requestId,
+            timestamp: new Date().toISOString(),
+          },
+        }),
+      };
     }
 
     // Generate unique request ID for tracking
@@ -358,14 +473,22 @@ const preferencesProcessingHandler = async (
       totalDuration,
     });
 
-    // Return success response with request ID for tracking
-    return createSuccessResponse({
+    // Return success response with request ID for tracking and security headers
+    const successResponse = createSuccessResponse({
       requestId,
       status: "PROCESSING",
       message:
         "Preferences submitted successfully. Story generation has been initiated.",
       estimatedCompletionTime: "2-3 minutes",
     });
+
+    return {
+      ...successResponse,
+      headers: {
+        ...successResponse.headers,
+        ...SECURITY_HEADERS,
+      },
+    };
   } catch (error) {
     const totalDuration = operationTimer.stop();
 
@@ -384,11 +507,19 @@ const preferencesProcessingHandler = async (
     );
     subsegment?.close();
 
-    return createErrorResponse(
+    const errorResponse = createErrorResponse(
       500,
       "INTERNAL_ERROR",
       "An unexpected error occurred. Please try again later."
     );
+
+    return {
+      ...errorResponse,
+      headers: {
+        ...errorResponse.headers,
+        ...SECURITY_HEADERS,
+      },
+    };
   }
 };
 

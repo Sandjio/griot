@@ -10,6 +10,14 @@ import {
   CorrelationContext,
   ErrorLogger,
 } from "../../utils/error-handler";
+import {
+  InputValidator,
+  validateApiGatewayEvent,
+  QUERY_PARAM_VALIDATION_RULES,
+  PATH_PARAM_VALIDATION_RULES,
+  RateLimiter,
+  SECURITY_HEADERS,
+} from "../../utils/input-validation";
 
 interface AuthorizedEvent extends APIGatewayProxyEvent {
   requestContext: APIGatewayProxyEvent["requestContext"] & {
@@ -72,6 +80,44 @@ const contentRetrievalHandler = async (
   );
 
   try {
+    // Validate API Gateway event for security
+    const eventValidation = validateApiGatewayEvent(event);
+    if (!eventValidation.isValid) {
+      ErrorLogger.logError(
+        new Error(
+          `Event validation failed: ${eventValidation.errors.join(", ")}`
+        ),
+        { requestId, userId, correlationId },
+        "ContentRetrieval"
+      );
+      return createErrorResponse(
+        400,
+        "INVALID_REQUEST",
+        "Request validation failed",
+        requestId,
+        timestamp
+      );
+    }
+
+    // Rate limiting check
+    const clientIp = event.requestContext.identity?.sourceIp || "unknown";
+    const rateLimitKey = `${userId}-${clientIp}`;
+    if (!RateLimiter.isAllowed(rateLimitKey, 50, 60000)) {
+      // 50 requests per minute for read operations
+      ErrorLogger.logError(
+        new Error("Rate limit exceeded"),
+        { requestId, userId, clientIp, correlationId },
+        "ContentRetrieval"
+      );
+      return createErrorResponse(
+        429,
+        "RATE_LIMIT_EXCEEDED",
+        "Too many requests. Please try again later.",
+        requestId,
+        timestamp
+      );
+    }
+
     // Route based on path and method
     if (method === "GET") {
       if (path === "/stories") {
@@ -87,7 +133,27 @@ const contentRetrievalHandler = async (
             timestamp
           );
         }
-        return await handleGetStory(storyId, userId, requestId, timestamp);
+
+        // Validate story ID format
+        const storyIdValidation = InputValidator.validate({ storyId }, [
+          PATH_PARAM_VALIDATION_RULES.storyId,
+        ]);
+        if (!storyIdValidation.isValid) {
+          return createErrorResponse(
+            400,
+            "INVALID_STORY_ID",
+            storyIdValidation.errors.join(", "),
+            requestId,
+            timestamp
+          );
+        }
+
+        return await handleGetStory(
+          storyIdValidation.sanitizedData!.storyId,
+          userId,
+          requestId,
+          timestamp
+        );
       } else if (path.startsWith("/episodes/")) {
         const episodeId = event.pathParameters?.episodeId;
         if (!episodeId) {
@@ -99,7 +165,27 @@ const contentRetrievalHandler = async (
             timestamp
           );
         }
-        return await handleGetEpisode(episodeId, userId, requestId, timestamp);
+
+        // Validate episode ID format
+        const episodeIdValidation = InputValidator.validate({ episodeId }, [
+          PATH_PARAM_VALIDATION_RULES.episodeId,
+        ]);
+        if (!episodeIdValidation.isValid) {
+          return createErrorResponse(
+            400,
+            "INVALID_EPISODE_ID",
+            episodeIdValidation.errors.join(", "),
+            requestId,
+            timestamp
+          );
+        }
+
+        return await handleGetEpisode(
+          episodeIdValidation.sanitizedData!.episodeId,
+          userId,
+          requestId,
+          timestamp
+        );
       }
     }
 
@@ -134,8 +220,36 @@ async function handleGetStories(
   timestamp: string
 ): Promise<APIGatewayProxyResult> {
   try {
-    // Parse query parameters
+    // Parse and validate query parameters
     const queryParams = event.queryStringParameters || {};
+
+    // Validate query parameters if they exist
+    const validationRules = [];
+    if (queryParams.limit) {
+      validationRules.push(QUERY_PARAM_VALIDATION_RULES.limit);
+    }
+    if (queryParams.status) {
+      validationRules.push(QUERY_PARAM_VALIDATION_RULES.status);
+    }
+
+    if (validationRules.length > 0) {
+      const queryValidation = InputValidator.validate(
+        queryParams,
+        validationRules
+      );
+      if (!queryValidation.isValid) {
+        return createErrorResponse(
+          400,
+          "INVALID_QUERY_PARAMS",
+          queryValidation.errors.join(", "),
+          requestId,
+          timestamp
+        );
+      }
+      // Use sanitized query parameters
+      Object.assign(queryParams, queryValidation.sanitizedData);
+    }
+
     const limit = Math.min(parseInt(queryParams.limit || "20"), 100); // Max 100 stories
     const status = queryParams.status as
       | "PENDING"
@@ -355,7 +469,7 @@ function transformEpisodeForResponse(episode: Episode) {
 }
 
 /**
- * Create standardized success response
+ * Create standardized success response with security headers
  */
 function createSuccessResponse(
   data: any,
@@ -378,13 +492,14 @@ function createSuccessResponse(
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Headers": "Content-Type,Authorization",
       "Access-Control-Allow-Methods": "GET,OPTIONS",
+      ...SECURITY_HEADERS,
     },
     body: JSON.stringify(response),
   };
 }
 
 /**
- * Create standardized error response
+ * Create standardized error response with security headers
  */
 function createErrorResponse(
   statusCode: number,
@@ -411,6 +526,8 @@ function createErrorResponse(
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Headers": "Content-Type,Authorization",
       "Access-Control-Allow-Methods": "GET,OPTIONS",
+      ...SECURITY_HEADERS,
+      ...(statusCode === 429 ? { "Retry-After": "60" } : {}),
     },
     body: JSON.stringify(response),
   };

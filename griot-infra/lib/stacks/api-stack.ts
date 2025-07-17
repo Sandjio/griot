@@ -7,13 +7,17 @@ import * as s3 from "aws-cdk-lib/aws-s3";
 import * as events from "aws-cdk-lib/aws-events";
 import * as logs from "aws-cdk-lib/aws-logs";
 import * as iam from "aws-cdk-lib/aws-iam";
+import * as ec2 from "aws-cdk-lib/aws-ec2";
 import { Construct } from "constructs";
+import { SecurityConstruct } from "../constructs/security-construct";
+import { LambdaMonitoringConstruct } from "../constructs/lambda-monitoring-construct";
 
 export interface ApiStackProps extends cdk.StackProps {
   environment: string;
   mangaTable: dynamodb.Table;
   contentBucket: s3.Bucket;
   eventBus: events.EventBus;
+  vpc?: ec2.Vpc;
 }
 
 export class ApiStack extends cdk.Stack {
@@ -21,9 +25,20 @@ export class ApiStack extends cdk.Stack {
   public readonly userPoolClient: cognito.UserPoolClient;
   public readonly api: apigateway.RestApi;
   public readonly postAuthTrigger: lambda.Function;
+  public readonly securityConstruct: SecurityConstruct;
+  public readonly lambdaFunctions: { [key: string]: lambda.Function } = {};
 
   constructor(scope: Construct, id: string, props: ApiStackProps) {
     super(scope, id, props);
+
+    // Initialize Security Construct
+    this.securityConstruct = new SecurityConstruct(this, "SecurityConstruct", {
+      environment: props.environment,
+      mangaTable: props.mangaTable,
+      contentBucket: props.contentBucket,
+      eventBus: props.eventBus,
+      vpc: props.vpc,
+    });
 
     // Cognito User Pool with comprehensive security policies
     this.userPool = new cognito.UserPool(this, "MangaUserPool", {
@@ -86,16 +101,31 @@ export class ApiStack extends cdk.Stack {
       runtime: lambda.Runtime.NODEJS_18_X,
       handler: "index.handler",
       code: lambda.Code.fromAsset("../src/lambdas/post-auth-trigger"),
+      role: this.securityConstruct.postAuthTriggerRole,
       environment: {
         MANGA_TABLE_NAME: props.mangaTable.tableName,
         ENVIRONMENT: props.environment,
+        // Security-related environment variables
+        ENABLE_SECURITY_LOGGING: "true",
+        SECURITY_CONTEXT: "postAuth",
       },
       timeout: cdk.Duration.seconds(30),
       memorySize: 256,
+      // Enable X-Ray tracing
+      tracing: lambda.Tracing.ACTIVE,
+      // VPC configuration if provided
+      ...(props.vpc
+        ? {
+            vpc: props.vpc,
+            vpcSubnets: {
+              subnets: props.vpc.privateSubnets,
+            },
+          }
+        : {}),
     });
 
-    // Grant DynamoDB permissions to Post Auth trigger
-    props.mangaTable.grantReadWriteData(this.postAuthTrigger);
+    // Store Lambda function reference
+    this.lambdaFunctions.postAuthTrigger = this.postAuthTrigger;
 
     // Add Post Authentication trigger to User Pool
     this.userPool.addTrigger(
@@ -386,12 +416,13 @@ export class ApiStack extends cdk.Stack {
       },
     });
 
-    // Preferences Processing Lambda function
+    // Preferences Processing Lambda function with security configuration
     const preferencesLambda = new lambda.Function(this, "PreferencesLambda", {
       functionName: `manga-preferences-${props.environment}`,
       runtime: lambda.Runtime.NODEJS_18_X,
       handler: "index.handler",
       code: lambda.Code.fromAsset("../src/lambdas/preferences-processing"),
+      role: this.securityConstruct.preferencesProcessingRole,
       environment: {
         MANGA_TABLE_NAME: props.mangaTable.tableName,
         CONTENT_BUCKET_NAME: props.contentBucket.bucketName,
@@ -399,30 +430,57 @@ export class ApiStack extends cdk.Stack {
         ENVIRONMENT: props.environment,
         QLOO_API_KEY: process.env.QLOO_API_KEY || "placeholder-key",
         QLOO_API_URL: process.env.QLOO_API_URL || "https://api.qloo.com",
+        // Security-related environment variables
+        ENABLE_SECURITY_LOGGING: "true",
+        SECURITY_CONTEXT: "preferences",
       },
       timeout: cdk.Duration.seconds(30),
       memorySize: 512,
+      // Enable X-Ray tracing
+      tracing: lambda.Tracing.ACTIVE,
+      // VPC configuration if provided
+      ...(props.vpc
+        ? {
+            vpc: props.vpc,
+            vpcSubnets: {
+              subnets: props.vpc.privateSubnets,
+            },
+          }
+        : {}),
     });
 
-    // Status Check Lambda function
+    // Status Check Lambda function with security configuration
     const statusCheckLambda = new lambda.Function(this, "StatusCheckLambda", {
       functionName: `manga-status-check-${props.environment}`,
       runtime: lambda.Runtime.NODEJS_18_X,
       handler: "index.handler",
       code: lambda.Code.fromAsset("../src/lambdas/status-check"),
+      role: this.securityConstruct.statusCheckRole,
       environment: {
         MANGA_TABLE_NAME: props.mangaTable.tableName,
         ENVIRONMENT: props.environment,
+        // Security-related environment variables
+        ENABLE_SECURITY_LOGGING: "true",
+        SECURITY_CONTEXT: "statusCheck",
       },
       timeout: cdk.Duration.seconds(15),
       memorySize: 256,
+      // Enable X-Ray tracing
+      tracing: lambda.Tracing.ACTIVE,
+      // VPC configuration if provided
+      ...(props.vpc
+        ? {
+            vpc: props.vpc,
+            vpcSubnets: {
+              subnets: props.vpc.privateSubnets,
+            },
+          }
+        : {}),
     });
 
-    // Grant permissions to Lambda functions
-    props.mangaTable.grantReadWriteData(preferencesLambda);
-    props.contentBucket.grantReadWrite(preferencesLambda);
-    props.eventBus.grantPutEventsTo(preferencesLambda);
-    props.mangaTable.grantReadData(statusCheckLambda);
+    // Store Lambda function references
+    this.lambdaFunctions.preferencesProcessing = preferencesLambda;
+    this.lambdaFunctions.statusCheck = statusCheckLambda;
 
     // API Resources and Methods with request validation
     const preferencesResource = this.api.root.addResource("preferences");
@@ -510,7 +568,7 @@ export class ApiStack extends cdk.Stack {
     const statusResource = this.api.root.addResource("status");
     const statusRequestResource = statusResource.addResource("{requestId}");
 
-    // Content Retrieval Lambda function
+    // Content Retrieval Lambda function with security configuration
     const contentRetrievalLambda = new lambda.Function(
       this,
       "ContentRetrievalLambda",
@@ -519,19 +577,33 @@ export class ApiStack extends cdk.Stack {
         runtime: lambda.Runtime.NODEJS_18_X,
         handler: "index.handler",
         code: lambda.Code.fromAsset("../src/lambdas/content-retrieval"),
+        role: this.securityConstruct.contentRetrievalRole,
         environment: {
           MANGA_TABLE_NAME: props.mangaTable.tableName,
           CONTENT_BUCKET_NAME: props.contentBucket.bucketName,
           ENVIRONMENT: props.environment,
+          // Security-related environment variables
+          ENABLE_SECURITY_LOGGING: "true",
+          SECURITY_CONTEXT: "contentRetrieval",
         },
         timeout: cdk.Duration.seconds(30),
         memorySize: 512,
+        // Enable X-Ray tracing
+        tracing: lambda.Tracing.ACTIVE,
+        // VPC configuration if provided
+        ...(props.vpc
+          ? {
+              vpc: props.vpc,
+              vpcSubnets: {
+                subnets: props.vpc.privateSubnets,
+              },
+            }
+          : {}),
       }
     );
 
-    // Grant permissions to Content Retrieval Lambda
-    props.mangaTable.grantReadData(contentRetrievalLambda);
-    props.contentBucket.grantRead(contentRetrievalLambda);
+    // Store Lambda function reference
+    this.lambdaFunctions.contentRetrieval = contentRetrievalLambda;
 
     // Add methods with proper validation and response models
     storiesResource.addMethod(
