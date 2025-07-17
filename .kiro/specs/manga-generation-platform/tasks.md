@@ -111,7 +111,7 @@
   - Write unit tests for image generation and PDF creation
   - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7_
 
-- [ ] 14. Create API endpoints for content retrieval
+- [x] 14. Create API endpoints for content retrieval
 
   - Implement GET /stories endpoint to retrieve user's generated stories
   - Create GET /stories/{storyId} endpoint for specific story details

@@ -510,35 +510,33 @@ export class ApiStack extends cdk.Stack {
     const statusResource = this.api.root.addResource("status");
     const statusRequestResource = statusResource.addResource("{requestId}");
 
-    // Placeholder responses for other endpoints
-    const placeholderLambda = new lambda.Function(this, "PlaceholderLambda", {
-      functionName: `manga-placeholder-${props.environment}`,
-      runtime: lambda.Runtime.NODEJS_18_X,
-      handler: "index.handler",
-      code: lambda.Code.fromInline(`
-        exports.handler = async (event) => {
-          const path = event.requestContext.resourcePath;
-          const method = event.httpMethod;
-          return {
-            statusCode: 200,
-            headers: {
-              'Content-Type': 'application/json',
-              'Access-Control-Allow-Origin': '*',
-            },
-            body: JSON.stringify({ 
-              message: \`\${method} \${path} - TODO: Implement\`,
-              path,
-              method
-            }),
-          };
-        };
-      `),
-    });
+    // Content Retrieval Lambda function
+    const contentRetrievalLambda = new lambda.Function(
+      this,
+      "ContentRetrievalLambda",
+      {
+        functionName: `manga-content-retrieval-${props.environment}`,
+        runtime: lambda.Runtime.NODEJS_18_X,
+        handler: "index.handler",
+        code: lambda.Code.fromAsset("../src/lambdas/content-retrieval"),
+        environment: {
+          MANGA_TABLE_NAME: props.mangaTable.tableName,
+          CONTENT_BUCKET_NAME: props.contentBucket.bucketName,
+          ENVIRONMENT: props.environment,
+        },
+        timeout: cdk.Duration.seconds(30),
+        memorySize: 512,
+      }
+    );
+
+    // Grant permissions to Content Retrieval Lambda
+    props.mangaTable.grantReadData(contentRetrievalLambda);
+    props.contentBucket.grantRead(contentRetrievalLambda);
 
     // Add methods with proper validation and response models
     storiesResource.addMethod(
       "GET",
-      new apigateway.LambdaIntegration(placeholderLambda, {
+      new apigateway.LambdaIntegration(contentRetrievalLambda, {
         proxy: true,
       }),
       {
@@ -574,7 +572,7 @@ export class ApiStack extends cdk.Stack {
 
     storyResource.addMethod(
       "GET",
-      new apigateway.LambdaIntegration(placeholderLambda, {
+      new apigateway.LambdaIntegration(contentRetrievalLambda, {
         proxy: true,
       }),
       {
@@ -614,7 +612,7 @@ export class ApiStack extends cdk.Stack {
 
     episodeResource.addMethod(
       "GET",
-      new apigateway.LambdaIntegration(placeholderLambda, {
+      new apigateway.LambdaIntegration(contentRetrievalLambda, {
         proxy: true,
       }),
       {
