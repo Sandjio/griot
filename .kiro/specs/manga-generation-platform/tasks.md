@@ -101,7 +101,7 @@
   - Write unit tests for episode generation workflow
   - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7_
 
-- [ ] 13. Implement Image Generation Lambda function
+- [x] 13. Implement Image Generation Lambda function
 
   - Create Lambda function to handle image generation events
   - Implement Bedrock image generation model integration
