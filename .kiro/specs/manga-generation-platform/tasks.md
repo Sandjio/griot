@@ -72,7 +72,7 @@
   - Write unit tests for preference processing and Qloo integration
   - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6_
 
-- [ ] 10. Create API endpoints for preference submission and status checking
+- [x] 10. Create API endpoints for preference submission and status checking
 
   - Implement POST /preferences endpoint with request validation
   - Create GET /status/{requestId} endpoint for generation progress

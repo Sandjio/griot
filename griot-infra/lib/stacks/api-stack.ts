@@ -294,11 +294,22 @@ export class ApiStack extends cdk.Stack {
             },
             artStyle: {
               type: apigateway.JsonSchemaType.STRING,
-              enum: ["manga", "anime", "realistic", "cartoon", "abstract"],
+              enum: [
+                "Traditional",
+                "Modern",
+                "Minimalist",
+                "Detailed",
+                "Cartoon",
+                "Realistic",
+                "Chibi",
+                "Dark",
+                "Colorful",
+                "Black and White",
+              ],
             },
             targetAudience: {
               type: apigateway.JsonSchemaType.STRING,
-              enum: ["children", "teen", "adult", "all-ages"],
+              enum: ["Children", "Teens", "Young Adults", "Adults", "All Ages"],
             },
             contentRating: {
               type: apigateway.JsonSchemaType.STRING,
@@ -375,36 +386,43 @@ export class ApiStack extends cdk.Stack {
       },
     });
 
-    // Placeholder Lambda functions for API endpoints
+    // Preferences Processing Lambda function
     const preferencesLambda = new lambda.Function(this, "PreferencesLambda", {
       functionName: `manga-preferences-${props.environment}`,
       runtime: lambda.Runtime.NODEJS_18_X,
       handler: "index.handler",
-      code: lambda.Code.fromInline(`
-        exports.handler = async (event) => {
-          console.log('Preferences Lambda:', JSON.stringify(event, null, 2));
-          return {
-            statusCode: 200,
-            headers: {
-              'Content-Type': 'application/json',
-              'Access-Control-Allow-Origin': '*',
-            },
-            body: JSON.stringify({ message: 'Preferences endpoint - TODO: Implement' }),
-          };
-        };
-      `),
+      code: lambda.Code.fromAsset("../src/lambdas/preferences-processing"),
       environment: {
         MANGA_TABLE_NAME: props.mangaTable.tableName,
         CONTENT_BUCKET_NAME: props.contentBucket.bucketName,
         EVENT_BUS_NAME: props.eventBus.eventBusName,
         ENVIRONMENT: props.environment,
+        QLOO_API_KEY: process.env.QLOO_API_KEY || "placeholder-key",
+        QLOO_API_URL: process.env.QLOO_API_URL || "https://api.qloo.com",
       },
+      timeout: cdk.Duration.seconds(30),
+      memorySize: 512,
     });
 
-    // Grant permissions to preferences lambda
+    // Status Check Lambda function
+    const statusCheckLambda = new lambda.Function(this, "StatusCheckLambda", {
+      functionName: `manga-status-check-${props.environment}`,
+      runtime: lambda.Runtime.NODEJS_18_X,
+      handler: "index.handler",
+      code: lambda.Code.fromAsset("../src/lambdas/status-check"),
+      environment: {
+        MANGA_TABLE_NAME: props.mangaTable.tableName,
+        ENVIRONMENT: props.environment,
+      },
+      timeout: cdk.Duration.seconds(15),
+      memorySize: 256,
+    });
+
+    // Grant permissions to Lambda functions
     props.mangaTable.grantReadWriteData(preferencesLambda);
     props.contentBucket.grantReadWrite(preferencesLambda);
     props.eventBus.grantPutEventsTo(preferencesLambda);
+    props.mangaTable.grantReadData(statusCheckLambda);
 
     // API Resources and Methods with request validation
     const preferencesResource = this.api.root.addResource("preferences");
@@ -636,7 +654,7 @@ export class ApiStack extends cdk.Stack {
 
     statusRequestResource.addMethod(
       "GET",
-      new apigateway.LambdaIntegration(placeholderLambda, {
+      new apigateway.LambdaIntegration(statusCheckLambda, {
         proxy: true,
       }),
       {

@@ -6,12 +6,9 @@ import {
 } from "../../database/access-patterns";
 import { EventPublishingHelpers } from "../../utils/event-publisher";
 import { UserPreferencesData, QlooInsights } from "../../types/data-models";
-import { QlooApiClient } from "./qloo-client.js"; // cspell:ignore qloo
-import { validatePreferences } from "./validation.js";
-import {
-  createErrorResponse,
-  createSuccessResponse,
-} from "./response-utils.js";
+import { QlooApiClient } from "./qloo-client"; // cspell:ignore qloo
+import { validatePreferences } from "./validation";
+import { createErrorResponse, createSuccessResponse } from "./response-utils";
 
 /**
  * Preferences Processing Lambda Function
