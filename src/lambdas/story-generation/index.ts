@@ -1,5 +1,6 @@
 import { EventBridgeEvent } from "aws-lambda";
 import { v4 as uuidv4 } from "uuid";
+import AWSXRay from "aws-xray-sdk-core";
 import { StoryGenerationEventDetail } from "../../types/event-schemas";
 import {
   StoryAccess,
@@ -14,6 +15,15 @@ import {
   CorrelationContext,
   ErrorLogger,
 } from "../../utils/error-handler";
+import {
+  BusinessMetrics,
+  ExternalAPIMetrics,
+  PerformanceTimer,
+  METRIC_NAMESPACES,
+} from "../../utils/cloudwatch-metrics";
+
+// Enable X-Ray tracing for AWS SDK
+const AWS = AWSXRay.captureAWS(require("aws-sdk"));
 
 /**
  * Story Generation Lambda Function
@@ -35,6 +45,13 @@ const storyGenerationHandler = async (
   event: StoryGenerationEvent,
   correlationId: string
 ): Promise<void> => {
+  // Start X-Ray subsegment for this operation
+  const segment = AWSXRay.getSegment();
+  const subsegment = segment?.addNewSubsegment("StoryGeneration");
+
+  // Start performance timer
+  const operationTimer = new PerformanceTimer("StoryGeneration");
+
   ErrorLogger.logInfo(
     "Story Generation Lambda invoked",
     {
@@ -43,6 +60,7 @@ const storyGenerationHandler = async (
       userId: event.detail.userId,
       requestId: event.detail.requestId,
       correlationId,
+      traceId: segment?.trace_id,
     },
     "StoryGeneration"
   );
@@ -51,22 +69,44 @@ const storyGenerationHandler = async (
 
   // Input validation
   if (!userId || userId.trim() === "") {
-    throw new Error("User ID is required and cannot be empty");
+    const error = new Error("User ID is required and cannot be empty");
+    subsegment?.addError(error);
+    subsegment?.close();
+    throw error;
   }
 
   if (!preferences) {
-    throw new Error("User preferences are required");
+    const error = new Error("User preferences are required");
+    subsegment?.addError(error);
+    subsegment?.close();
+    throw error;
   }
 
   if (!insights) {
-    throw new Error("User insights are required");
+    const error = new Error("User insights are required");
+    subsegment?.addError(error);
+    subsegment?.close();
+    throw error;
   }
 
   const storyId = uuidv4();
   const timestamp = new Date().toISOString();
 
+  // Add context to X-Ray
+  subsegment?.addAnnotation("userId", userId);
+  subsegment?.addAnnotation("requestId", requestId);
+  subsegment?.addAnnotation("storyId", storyId);
+  subsegment?.addMetadata("preferences", {
+    genres: preferences.genres,
+    themes: preferences.themes,
+    artStyle: preferences.artStyle,
+    targetAudience: preferences.targetAudience,
+    contentRating: preferences.contentRating,
+  });
+
   try {
     // Update generation request status to processing
+    const dbTimer = new PerformanceTimer("DynamoDB-UpdateStatus");
     await GenerationRequestAccess.updateStatus(
       userId,
       requestId,
@@ -75,8 +115,9 @@ const storyGenerationHandler = async (
         relatedEntityId: storyId,
       }
     );
+    const dbDuration = dbTimer.stop();
 
-    console.log("Starting story generation", {
+    ErrorLogger.logInfo("Starting story generation", {
       userId,
       requestId,
       storyId,
@@ -92,21 +133,62 @@ const storyGenerationHandler = async (
     // Initialize Bedrock client for story generation
     const bedrockClient = new BedrockClient();
 
-    // Generate story content using Bedrock
-    const storyResponse = await bedrockClient.generateStory(
-      preferences,
-      insights
-    );
+    // Generate story content using Bedrock with timing and tracing
+    const bedrockSubsegment = subsegment?.addNewSubsegment("BedrockAPI");
+    const bedrockTimer = new PerformanceTimer("BedrockAPI-StoryGeneration");
 
-    console.log("Successfully generated story content", {
-      userId,
-      requestId,
-      storyId,
-      contentLength: storyResponse.content.length,
-      tokensUsed:
+    let storyResponse;
+    try {
+      storyResponse = await bedrockClient.generateStory(preferences, insights);
+
+      const bedrockDuration = bedrockTimer.stop();
+      const tokensUsed =
         (storyResponse.usage?.inputTokens || 0) +
-        (storyResponse.usage?.outputTokens || 0),
-    });
+        (storyResponse.usage?.outputTokens || 0);
+
+      bedrockSubsegment?.addAnnotation("success", true);
+      bedrockSubsegment?.addAnnotation("tokensUsed", tokensUsed);
+      bedrockSubsegment?.addMetadata("response", {
+        contentLength: storyResponse.content.length,
+        tokensUsed,
+        duration: bedrockDuration,
+      });
+      bedrockSubsegment?.close();
+
+      // Record Bedrock API metrics
+      await ExternalAPIMetrics.recordBedrockAPICall(
+        "claude-3-sonnet",
+        bedrockDuration
+      );
+      await ExternalAPIMetrics.recordBedrockAPISuccess("claude-3-sonnet");
+
+      ErrorLogger.logInfo("Successfully generated story content", {
+        userId,
+        requestId,
+        storyId,
+        contentLength: storyResponse.content.length,
+        tokensUsed,
+        duration: bedrockDuration,
+      });
+    } catch (bedrockError) {
+      const bedrockDuration = bedrockTimer.stop();
+
+      bedrockSubsegment?.addError(
+        bedrockError instanceof Error
+          ? bedrockError
+          : new Error(String(bedrockError))
+      );
+      bedrockSubsegment?.addAnnotation("success", false);
+      bedrockSubsegment?.close();
+
+      // Record Bedrock API failure metrics
+      await ExternalAPIMetrics.recordBedrockAPIFailure(
+        "claude-3-sonnet",
+        "GENERATION_ERROR"
+      );
+
+      throw bedrockError;
+    }
 
     // Parse the generated story content to extract title and content
     const { title, content } = parseStoryContent(storyResponse.content);
@@ -131,22 +213,26 @@ const storyGenerationHandler = async (
     // Initialize storage service
     const storageService = createMangaStorageService();
 
-    // Save story to S3 as Markdown file
+    // Save story to S3 as Markdown file with timing
+    const s3Timer = new PerformanceTimer("S3-SaveStory");
     const s3Reference = await storageService.saveStory(
       userId,
       storyId,
       storyContent
     );
+    const s3Duration = s3Timer.stop();
 
-    console.log("Successfully saved story to S3", {
+    ErrorLogger.logInfo("Successfully saved story to S3", {
       userId,
       requestId,
       storyId,
       s3Key: s3Reference.key,
       bucket: s3Reference.bucket,
+      duration: s3Duration,
     });
 
-    // Store story metadata in DynamoDB
+    // Store story metadata in DynamoDB with timing
+    const storeTimer = new PerformanceTimer("DynamoDB-CreateStory");
     await StoryAccess.create({
       storyId,
       userId,
@@ -156,11 +242,13 @@ const storyGenerationHandler = async (
       createdAt: timestamp,
       updatedAt: timestamp,
     });
+    const storeDuration = storeTimer.stop();
 
-    console.log("Successfully stored story metadata in DynamoDB", {
+    ErrorLogger.logInfo("Successfully stored story metadata in DynamoDB", {
       userId,
       requestId,
       storyId,
+      duration: storeDuration,
     });
 
     // Update generation request status to completed
@@ -168,19 +256,22 @@ const storyGenerationHandler = async (
       relatedEntityId: storyId,
     });
 
-    // Publish episode generation event
+    // Publish episode generation event with timing
+    const eventTimer = new PerformanceTimer("EventBridge-PublishEpisode");
     await EventPublishingHelpers.publishEpisodeGeneration(
       userId,
       storyId,
       s3Reference.key,
       1 // Start with episode 1
     );
+    const eventDuration = eventTimer.stop();
 
-    console.log("Successfully published episode generation event", {
+    ErrorLogger.logInfo("Successfully published episode generation event", {
       userId,
       requestId,
       storyId,
       episodeNumber: 1,
+      duration: eventDuration,
     });
 
     // Publish status update event
@@ -192,20 +283,48 @@ const storyGenerationHandler = async (
       storyId
     );
 
-    console.log("Story generation completed successfully", {
+    // Record successful completion metrics
+    const totalDuration = operationTimer.stop();
+    await BusinessMetrics.recordStoryGenerationSuccess(userId, totalDuration);
+
+    // Add success annotations to X-Ray
+    subsegment?.addAnnotation("success", true);
+    subsegment?.addAnnotation("storyTitle", title);
+    subsegment?.addMetadata("performance", {
+      totalDuration,
+      bedrockDuration: bedrockTimer.stop(),
+      s3Duration,
+      storeDuration,
+      eventDuration,
+    });
+    subsegment?.close();
+
+    ErrorLogger.logInfo("Story generation completed successfully", {
       userId,
       requestId,
       storyId,
       title,
+      totalDuration,
     });
   } catch (error) {
-    console.error("Error in story generation", {
-      userId,
-      requestId,
-      storyId,
-      error: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : undefined,
-    });
+    const totalDuration = operationTimer.stop();
+
+    ErrorLogger.logError(
+      error instanceof Error ? error : new Error(String(error)),
+      {
+        userId,
+        requestId,
+        storyId,
+        totalDuration,
+        operation: "StoryGeneration",
+      },
+      "StoryGeneration"
+    );
+
+    // Record failure metrics
+    const errorType =
+      error instanceof Error ? error.constructor.name : "UNKNOWN_ERROR";
+    await BusinessMetrics.recordStoryGenerationFailure(userId, errorType);
 
     try {
       // Update story status to failed if it was created
@@ -232,16 +351,31 @@ const storyGenerationHandler = async (
         error instanceof Error ? error.message : String(error)
       );
     } catch (cleanupError) {
-      console.error("Error during cleanup after story generation failure", {
-        userId,
-        requestId,
-        storyId,
-        cleanupError:
-          cleanupError instanceof Error
-            ? cleanupError.message
-            : String(cleanupError),
-      });
+      ErrorLogger.logError(
+        cleanupError instanceof Error
+          ? cleanupError
+          : new Error(String(cleanupError)),
+        {
+          userId,
+          requestId,
+          storyId,
+          operation: "StoryGeneration-Cleanup",
+        },
+        "StoryGeneration"
+      );
     }
+
+    // Add error to X-Ray
+    subsegment?.addError(
+      error instanceof Error ? error : new Error(String(error))
+    );
+    subsegment?.addAnnotation("success", false);
+    subsegment?.addMetadata("error", {
+      message: error instanceof Error ? error.message : String(error),
+      type: errorType,
+      totalDuration,
+    });
+    subsegment?.close();
 
     // Re-throw the original error to trigger Lambda retry/DLQ
     throw error;
