@@ -1,0 +1,358 @@
+import { EventBridgeEvent } from "aws-lambda";
+import { v4 as uuidv4 } from "uuid";
+import { EpisodeGenerationEventDetail } from "../../types/event-schemas";
+import {
+  StoryAccess,
+  EpisodeAccess,
+  GenerationRequestAccess,
+} from "../../database/access-patterns";
+import { EventPublishingHelpers } from "../../utils/event-publisher";
+import { createMangaStorageService } from "../../storage/manga-storage";
+import { BedrockClient } from "./bedrock-client";
+import { EpisodeContent } from "../../storage/manga-storage";
+
+/**
+ * Episode Generation Lambda Function
+ *
+ * Handles episode generation events from EventBridge, fetches story content from S3,
+ * integrates with Amazon Bedrock for episode content generation, saves generated
+ * episode as Markdown file to S3, stores episode metadata in DynamoDB, and
+ * publishes events for image generation.
+ *
+ * Requirements: 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7
+ */
+
+interface EpisodeGenerationEvent
+  extends EventBridgeEvent<
+    "Episode Generation Requested",
+    EpisodeGenerationEventDetail
+  > {}
+
+export const handler = async (event: EpisodeGenerationEvent): Promise<void> => {
+  console.log("Episode Generation Lambda invoked", {
+    source: event.source,
+    detailType: event["detail-type"],
+    userId: event.detail.userId,
+    storyId: event.detail.storyId,
+    episodeNumber: event.detail.episodeNumber,
+  });
+
+  const { userId, storyId, storyS3Key, episodeNumber } = event.detail;
+
+  // Input validation
+  if (!userId || userId.trim() === "") {
+    throw new Error("User ID is required and cannot be empty");
+  }
+
+  if (!storyId || storyId.trim() === "") {
+    throw new Error("Story ID is required and cannot be empty");
+  }
+
+  if (!storyS3Key || storyS3Key.trim() === "") {
+    throw new Error("Story S3 key is required and cannot be empty");
+  }
+
+  if (!episodeNumber || episodeNumber < 1) {
+    throw new Error("Episode number must be a positive integer");
+  }
+
+  const episodeId = uuidv4();
+  const timestamp = new Date().toISOString();
+
+  try {
+    console.log("Starting episode generation", {
+      userId,
+      storyId,
+      episodeId,
+      episodeNumber,
+      storyS3Key,
+    });
+
+    // Verify story exists and get story metadata
+    const story = await StoryAccess.getByStoryId(storyId);
+    if (!story) {
+      throw new Error(`Story not found: ${storyId}`);
+    }
+
+    if (story.status !== "COMPLETED") {
+      throw new Error(
+        `Story is not completed. Current status: ${story.status}`
+      );
+    }
+
+    // Check if episode already exists
+    const existingEpisode = await EpisodeAccess.get(storyId, episodeNumber);
+    if (existingEpisode && existingEpisode.status === "COMPLETED") {
+      console.log("Episode already exists and is completed", {
+        episodeId: existingEpisode.episodeId,
+        status: existingEpisode.status,
+      });
+
+      // Publish image generation event for existing episode
+      await EventPublishingHelpers.publishImageGeneration(
+        userId,
+        existingEpisode.episodeId,
+        existingEpisode.s3Key
+      );
+
+      return;
+    }
+
+    // Create episode record with PROCESSING status
+    await EpisodeAccess.create({
+      episodeId,
+      episodeNumber,
+      storyId,
+      s3Key: "", // Will be updated after S3 save
+      status: "PROCESSING",
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+
+    console.log("Created episode record in DynamoDB", {
+      episodeId,
+      episodeNumber,
+      storyId,
+      status: "PROCESSING",
+    });
+
+    // Initialize storage service
+    const storageService = createMangaStorageService();
+
+    // Fetch story content from S3
+    console.log("Fetching story content from S3", {
+      storyS3Key,
+      userId,
+      storyId,
+    });
+
+    const storyContent = await storageService.getStory(userId, storyId);
+
+    if (!storyContent || storyContent.trim() === "") {
+      throw new Error("Story content is empty or not found in S3");
+    }
+
+    console.log("Successfully fetched story content", {
+      contentLength: storyContent.length,
+      storyId,
+    });
+
+    // Initialize Bedrock client for episode generation
+    const bedrockClient = new BedrockClient();
+
+    // Generate episode content using Bedrock
+    const episodeResponse = await bedrockClient.generateEpisode(
+      storyContent,
+      episodeNumber,
+      story.title
+    );
+
+    console.log("Successfully generated episode content", {
+      userId,
+      storyId,
+      episodeId,
+      episodeNumber,
+      contentLength: episodeResponse.content.length,
+      tokensUsed:
+        (episodeResponse.usage?.inputTokens || 0) +
+        (episodeResponse.usage?.outputTokens || 0),
+    });
+
+    // Parse the generated episode content to extract title and content
+    const { title, content } = parseEpisodeContent(
+      episodeResponse.content,
+      episodeNumber
+    );
+
+    // Create episode content object
+    const episodeContent: EpisodeContent = {
+      episodeNumber,
+      title,
+      content,
+      storyId,
+      metadata: {
+        episodeId,
+        userId,
+        storyId,
+        storyTitle: story.title,
+        generatedAt: timestamp,
+        tokensUsed:
+          (episodeResponse.usage?.inputTokens || 0) +
+          (episodeResponse.usage?.outputTokens || 0),
+      },
+    };
+
+    // Save episode to S3 as Markdown file
+    const s3Reference = await storageService.saveEpisode(
+      userId,
+      storyId,
+      episodeContent
+    );
+
+    console.log("Successfully saved episode to S3", {
+      userId,
+      storyId,
+      episodeId,
+      episodeNumber,
+      s3Key: s3Reference.key,
+      bucket: s3Reference.bucket,
+    });
+
+    // Update episode metadata in DynamoDB with S3 key and completed status
+    await EpisodeAccess.updateStatus(storyId, episodeNumber, "COMPLETED", {
+      s3Key: s3Reference.key,
+      title,
+    });
+
+    console.log("Successfully updated episode metadata in DynamoDB", {
+      userId,
+      storyId,
+      episodeId,
+      episodeNumber,
+      s3Key: s3Reference.key,
+    });
+
+    // Publish image generation event
+    await EventPublishingHelpers.publishImageGeneration(
+      userId,
+      episodeId,
+      s3Reference.key
+    );
+
+    console.log("Successfully published image generation event", {
+      userId,
+      storyId,
+      episodeId,
+      episodeNumber,
+    });
+
+    // Publish status update event
+    await EventPublishingHelpers.publishStatusUpdate(
+      userId,
+      story.userId, // Use the story's associated request ID if available
+      "EPISODE",
+      "COMPLETED",
+      episodeId
+    );
+
+    console.log("Episode generation completed successfully", {
+      userId,
+      storyId,
+      episodeId,
+      episodeNumber,
+      title,
+    });
+  } catch (error) {
+    console.error("Error in episode generation", {
+      userId,
+      storyId,
+      episodeId,
+      episodeNumber,
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+
+    try {
+      // Update episode status to failed if it was created
+      const existingEpisode = await EpisodeAccess.get(storyId, episodeNumber);
+      if (existingEpisode) {
+        await EpisodeAccess.updateStatus(storyId, episodeNumber, "FAILED", {
+          errorMessage: error instanceof Error ? error.message : String(error),
+        });
+      }
+
+      // Publish status update event for failure
+      await EventPublishingHelpers.publishStatusUpdate(
+        userId,
+        storyId, // Use storyId as fallback for requestId
+        "EPISODE",
+        "FAILED",
+        episodeId,
+        error instanceof Error ? error.message : String(error)
+      );
+    } catch (cleanupError) {
+      console.error("Error during cleanup after episode generation failure", {
+        userId,
+        storyId,
+        episodeId,
+        episodeNumber,
+        cleanupError:
+          cleanupError instanceof Error
+            ? cleanupError.message
+            : String(cleanupError),
+      });
+    }
+
+    // Re-throw the original error to trigger Lambda retry/DLQ
+    throw error;
+  }
+};
+
+/**
+ * Parse generated episode content to extract title and main content
+ */
+function parseEpisodeContent(
+  generatedContent: string,
+  episodeNumber: number
+): {
+  title: string;
+  content: string;
+} {
+  // Look for title patterns in the generated content
+  const lines = generatedContent.split("\n");
+  let title = `Episode ${episodeNumber}`;
+  let contentStartIndex = 0;
+
+  // Try to find title in various formats
+  for (let i = 0; i < Math.min(lines.length, 10); i++) {
+    const line = lines[i].trim();
+
+    // Check for markdown title (# Title)
+    if (line.startsWith("# ")) {
+      title = line.substring(2).trim();
+      contentStartIndex = i + 1;
+      break;
+    }
+
+    // Check for "Episode X:" format
+    const episodeMatch = line.match(/^Episode\s+\d+:\s*(.+)$/i);
+    if (episodeMatch && episodeMatch[1].trim().length > 0) {
+      title = `Episode ${episodeNumber}: ${episodeMatch[1].trim()}`;
+      contentStartIndex = i + 1;
+      break;
+    }
+
+    // Check for "Title:" format
+    if (line.toLowerCase().startsWith("title:")) {
+      const titleText = line.substring(6).trim();
+      title = titleText.startsWith("Episode")
+        ? titleText
+        : `Episode ${episodeNumber}: ${titleText}`;
+      contentStartIndex = i + 1;
+      continue;
+    }
+
+    // Check for bold title (**Title**)
+    const boldMatch = line.match(/^\*\*(.*?)\*\*$/);
+    if (boldMatch && boldMatch[1].trim().length > 0) {
+      const titleText = boldMatch[1].trim();
+      title = titleText.startsWith("Episode")
+        ? titleText
+        : `Episode ${episodeNumber}: ${titleText}`;
+      contentStartIndex = i + 1;
+      break;
+    }
+  }
+
+  // Extract content (skip empty lines after title)
+  while (
+    contentStartIndex < lines.length &&
+    lines[contentStartIndex].trim() === ""
+  ) {
+    contentStartIndex++;
+  }
+
+  const content = lines.slice(contentStartIndex).join("\n").trim();
+
+  return { title, content };
+}

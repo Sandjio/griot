@@ -91,7 +91,7 @@
   - Write unit tests for story generation and Bedrock integration
   - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7_
 
-- [ ] 12. Implement Episode Generation Lambda function
+- [x] 12. Implement Episode Generation Lambda function
 
   - Create Lambda function to handle episode generation events
   - Add S3 operations to fetch story content and save episode content
