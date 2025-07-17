@@ -9,6 +9,11 @@ import { EventPublishingHelpers } from "../../utils/event-publisher";
 import { createMangaStorageService } from "../../storage/manga-storage";
 import { BedrockClient } from "./bedrock-client";
 import { StoryContent } from "../../storage/manga-storage";
+import {
+  withErrorHandling,
+  CorrelationContext,
+  ErrorLogger,
+} from "../../utils/error-handler";
 
 /**
  * Story Generation Lambda Function
@@ -26,13 +31,21 @@ interface StoryGenerationEvent
     StoryGenerationEventDetail
   > {}
 
-export const handler = async (event: StoryGenerationEvent): Promise<void> => {
-  console.log("Story Generation Lambda invoked", {
-    source: event.source,
-    detailType: event["detail-type"],
-    userId: event.detail.userId,
-    requestId: event.detail.requestId,
-  });
+const storyGenerationHandler = async (
+  event: StoryGenerationEvent,
+  correlationId: string
+): Promise<void> => {
+  ErrorLogger.logInfo(
+    "Story Generation Lambda invoked",
+    {
+      source: event.source,
+      detailType: event["detail-type"],
+      userId: event.detail.userId,
+      requestId: event.detail.requestId,
+      correlationId,
+    },
+    "StoryGeneration"
+  );
 
   const { userId, requestId, preferences, insights } = event.detail;
 
@@ -91,7 +104,7 @@ export const handler = async (event: StoryGenerationEvent): Promise<void> => {
       storyId,
       contentLength: storyResponse.content.length,
       tokensUsed:
-        storyResponse.usage?.inputTokens +
+        (storyResponse.usage?.inputTokens || 0) +
         (storyResponse.usage?.outputTokens || 0),
     });
 
@@ -110,7 +123,7 @@ export const handler = async (event: StoryGenerationEvent): Promise<void> => {
         insights: JSON.stringify(insights),
         generatedAt: timestamp,
         tokensUsed:
-          storyResponse.usage?.inputTokens +
+          (storyResponse.usage?.inputTokens || 0) +
           (storyResponse.usage?.outputTokens || 0),
       },
     };
@@ -286,3 +299,9 @@ function parseStoryContent(generatedContent: string): {
 
   return { title, content };
 }
+
+// Export the handler wrapped with error handling
+export const handler = withErrorHandling(
+  storyGenerationHandler,
+  "StoryGeneration"
+);

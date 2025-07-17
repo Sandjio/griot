@@ -7,6 +7,11 @@ import {
 import { GenerationRequest, Story, Episode } from "../../types/data-models";
 import { StatusResponse } from "../../types/api-types";
 import { createErrorResponse } from "../preferences-processing/response-utils";
+import {
+  withErrorHandling,
+  CorrelationContext,
+  ErrorLogger,
+} from "../../utils/error-handler";
 
 /**
  * Status Check Lambda Function
@@ -31,15 +36,21 @@ interface StatusCheckEvent extends APIGatewayProxyEvent {
   };
 }
 
-export const handler = async (
-  event: StatusCheckEvent
+const statusCheckHandler = async (
+  event: StatusCheckEvent,
+  correlationId: string
 ): Promise<APIGatewayProxyResult> => {
-  console.log("Status Check Lambda invoked", {
-    requestId: event.requestContext.requestId,
-    httpMethod: event.httpMethod,
-    path: event.path,
-    pathParameters: event.pathParameters,
-  });
+  ErrorLogger.logInfo(
+    "Status Check Lambda invoked",
+    {
+      requestId: event.requestContext.requestId,
+      httpMethod: event.httpMethod,
+      path: event.path,
+      pathParameters: event.pathParameters,
+      correlationId,
+    },
+    "StatusCheck"
+  );
 
   try {
     const lambdaRequestId = event.requestContext.requestId;
@@ -345,3 +356,6 @@ async function getEpisodeProgress(request: GenerationRequest): Promise<{
     };
   }
 }
+
+// Export the handler wrapped with error handling
+export const handler = withErrorHandling(statusCheckHandler, "StatusCheck");

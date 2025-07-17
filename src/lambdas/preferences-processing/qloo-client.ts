@@ -1,4 +1,12 @@
 import { UserPreferencesData, QlooInsights } from "../../types/data-models";
+import {
+  CircuitBreakerRegistry,
+  RetryHandler,
+  EXTERNAL_API_RETRY_CONFIG,
+  ErrorLogger,
+  CorrelationContext,
+} from "../../utils/error-handler";
+import { ErrorUtils } from "../../types/error-types";
 
 /**
  * Qloo API Client
@@ -23,53 +31,92 @@ interface QlooApiResponse {
   message?: string;
 }
 
-interface RetryConfig {
-  maxRetries: number;
-  baseDelayMs: number;
-  maxDelayMs: number;
-  backoffMultiplier: number;
-}
-
 export class QlooApiClient {
   private apiUrl: string;
   private apiKey: string;
-  private retryConfig: RetryConfig;
   private timeout: number;
+  private circuitBreaker;
+  private retryHandler;
 
   constructor() {
     this.apiUrl = process.env.QLOO_API_URL || "";
     this.apiKey = process.env.QLOO_API_KEY || "";
     this.timeout = parseInt(process.env.QLOO_API_TIMEOUT || "10000", 10);
 
-    this.retryConfig = {
-      maxRetries: 3,
-      baseDelayMs: 1000,
-      maxDelayMs: 10000,
-      backoffMultiplier: 2,
-    };
-
     if (!this.apiUrl || !this.apiKey) {
       throw new Error(
         "Qloo API configuration is missing. Please set QLOO_API_URL and QLOO_API_KEY environment variables."
       );
     }
+
+    // Initialize circuit breaker for Qloo API
+    this.circuitBreaker = CircuitBreakerRegistry.getOrCreate("qloo-api", {
+      failureThreshold: 3,
+      recoveryTimeoutMs: 30000, // 30 seconds
+      monitoringPeriodMs: 300000, // 5 minutes
+      halfOpenMaxCalls: 2,
+    });
+
+    // Initialize retry handler with external API configuration
+    this.retryHandler = new RetryHandler(EXTERNAL_API_RETRY_CONFIG);
   }
 
   /**
    * Fetch insights from Qloo API based on user preferences
    */
   async fetchInsights(preferences: UserPreferencesData): Promise<QlooInsights> {
+    const correlationId = CorrelationContext.getCorrelationId();
     const requestPayload = this.buildQlooRequest(preferences);
 
-    console.log("Fetching insights from Qloo API", {
-      url: this.apiUrl,
-      payload: requestPayload,
-    });
+    ErrorLogger.logInfo(
+      "Fetching insights from Qloo API",
+      {
+        url: this.apiUrl,
+        payload: requestPayload,
+        correlationId,
+      },
+      "QlooApiClient.fetchInsights"
+    );
 
-    return this.executeWithRetry(async () => {
-      const response = await this.makeApiCall(requestPayload);
-      return this.parseQlooResponse(response);
-    });
+    try {
+      // Use circuit breaker with retry handler
+      return await this.circuitBreaker.execute(async () => {
+        return await this.retryHandler.execute(async () => {
+          const response = await this.makeApiCall(requestPayload);
+          return this.parseQlooResponse(response);
+        }, "QlooApiCall");
+      });
+    } catch (error) {
+      // Convert QlooApiError to standardized error format
+      if (error instanceof QlooApiError) {
+        const standardError = ErrorUtils.createError(
+          "EXTERNAL_SERVICE_ERROR",
+          error.message,
+          {
+            service: "qloo-api",
+            operation: "fetchInsights",
+            statusCode: error.statusCode,
+            responseBody: error.responseBody,
+            retryable: this.shouldRetry(error),
+          },
+          correlationId
+        );
+
+        ErrorLogger.logError(
+          standardError,
+          { preferences },
+          "QlooApiClient.fetchInsights"
+        );
+        throw standardError;
+      }
+
+      ErrorLogger.logError(
+        error instanceof Error ? error : new Error(String(error)),
+        { preferences },
+        "QlooApiClient.fetchInsights"
+      );
+      throw error;
+    }
   }
 
   /**
@@ -196,51 +243,6 @@ export class QlooApiClient {
   }
 
   /**
-   * Execute API call with exponential backoff retry logic
-   */
-  private async executeWithRetry<T>(operation: () => Promise<T>): Promise<T> {
-    let lastError: Error = new Error("Unknown error");
-
-    for (let attempt = 0; attempt <= this.retryConfig.maxRetries; attempt++) {
-      try {
-        return await operation();
-      } catch (error) {
-        lastError = error instanceof Error ? error : new Error(String(error));
-
-        // Don't retry on certain error types
-        if (error instanceof QlooApiError && !this.shouldRetry(error)) {
-          throw error;
-        }
-
-        // Don't retry on the last attempt
-        if (attempt === this.retryConfig.maxRetries) {
-          break;
-        }
-
-        // Calculate delay with exponential backoff and jitter
-        const delay = Math.min(
-          this.retryConfig.baseDelayMs *
-            Math.pow(this.retryConfig.backoffMultiplier, attempt),
-          this.retryConfig.maxDelayMs
-        );
-
-        // Add jitter to prevent thundering herd
-        const jitteredDelay = delay + Math.random() * 1000;
-
-        console.log(`Qloo API call failed, retrying in ${jitteredDelay}ms`, {
-          attempt: attempt + 1,
-          maxRetries: this.retryConfig.maxRetries,
-          error: lastError.message,
-        });
-
-        await this.sleep(jitteredDelay);
-      }
-    }
-
-    throw lastError;
-  }
-
-  /**
    * Determine if an error should trigger a retry
    */
   private shouldRetry(error: QlooApiError): boolean {
@@ -250,13 +252,6 @@ export class QlooApiClient {
       error.statusCode === 429 ||
       error.statusCode === 408
     );
-  }
-
-  /**
-   * Sleep utility for retry delays
-   */
-  private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }
 

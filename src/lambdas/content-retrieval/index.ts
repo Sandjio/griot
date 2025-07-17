@@ -5,6 +5,11 @@ import {
   BatchOperations,
 } from "../../database/access-patterns";
 import { Story, Episode } from "../../types/data-models";
+import {
+  withErrorHandling,
+  CorrelationContext,
+  ErrorLogger,
+} from "../../utils/error-handler";
 
 interface AuthorizedEvent extends APIGatewayProxyEvent {
   requestContext: APIGatewayProxyEvent["requestContext"] & {
@@ -44,8 +49,9 @@ interface SuccessResponse {
  * - GET /stories/{storyId} - Get specific story details
  * - GET /episodes/{episodeId} - Get specific episode
  */
-export const handler = async (
-  event: AuthorizedEvent
+const contentRetrievalHandler = async (
+  event: AuthorizedEvent,
+  correlationId: string
 ): Promise<APIGatewayProxyResult> => {
   const requestId = event.requestContext.requestId;
   const timestamp = new Date().toISOString();
@@ -53,12 +59,17 @@ export const handler = async (
   const path = event.path;
   const method = event.httpMethod;
 
-  console.log(`Processing ${method} ${path} for user ${userId}`, {
-    requestId,
-    userId,
-    path,
-    method,
-  });
+  ErrorLogger.logInfo(
+    `Processing ${method} ${path} for user ${userId}`,
+    {
+      requestId,
+      userId,
+      path,
+      method,
+      correlationId,
+    },
+    "ContentRetrieval"
+  );
 
   try {
     // Route based on path and method
@@ -404,3 +415,9 @@ function createErrorResponse(
     body: JSON.stringify(response),
   };
 }
+
+// Export the handler wrapped with error handling
+export const handler = withErrorHandling(
+  contentRetrievalHandler,
+  "ContentRetrieval"
+);

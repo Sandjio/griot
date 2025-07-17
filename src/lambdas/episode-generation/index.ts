@@ -10,6 +10,11 @@ import { EventPublishingHelpers } from "../../utils/event-publisher";
 import { createMangaStorageService } from "../../storage/manga-storage";
 import { BedrockClient } from "./bedrock-client";
 import { EpisodeContent } from "../../storage/manga-storage";
+import {
+  withErrorHandling,
+  CorrelationContext,
+  ErrorLogger,
+} from "../../utils/error-handler";
 
 /**
  * Episode Generation Lambda Function
@@ -28,14 +33,22 @@ interface EpisodeGenerationEvent
     EpisodeGenerationEventDetail
   > {}
 
-export const handler = async (event: EpisodeGenerationEvent): Promise<void> => {
-  console.log("Episode Generation Lambda invoked", {
-    source: event.source,
-    detailType: event["detail-type"],
-    userId: event.detail.userId,
-    storyId: event.detail.storyId,
-    episodeNumber: event.detail.episodeNumber,
-  });
+const episodeGenerationHandler = async (
+  event: EpisodeGenerationEvent,
+  correlationId: string
+): Promise<void> => {
+  ErrorLogger.logInfo(
+    "Episode Generation Lambda invoked",
+    {
+      source: event.source,
+      detailType: event["detail-type"],
+      userId: event.detail.userId,
+      storyId: event.detail.storyId,
+      episodeNumber: event.detail.episodeNumber,
+      correlationId,
+    },
+    "EpisodeGeneration"
+  );
 
   const { userId, storyId, storyS3Key, episodeNumber } = event.detail;
 
@@ -356,3 +369,9 @@ function parseEpisodeContent(
 
   return { title, content };
 }
+
+// Export the handler wrapped with error handling
+export const handler = withErrorHandling(
+  episodeGenerationHandler,
+  "EpisodeGeneration"
+);

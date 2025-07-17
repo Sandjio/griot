@@ -9,6 +9,11 @@ import { EventPublishingHelpers } from "../../utils/event-publisher";
 import { createMangaStorageService } from "../../storage/manga-storage";
 import { BedrockImageClient } from "./bedrock-client";
 import { PDFGenerator } from "./pdf-generator";
+import {
+  withErrorHandling,
+  CorrelationContext,
+  ErrorLogger,
+} from "../../utils/error-handler";
 
 /**
  * Image Generation Lambda Function
@@ -27,14 +32,22 @@ interface ImageGenerationEvent
     ImageGenerationEventDetail
   > {}
 
-export const handler = async (event: ImageGenerationEvent): Promise<void> => {
-  console.log("Image Generation Lambda invoked", {
-    source: event.source,
-    detailType: event["detail-type"],
-    userId: event.detail.userId,
-    episodeId: event.detail.episodeId,
-    episodeS3Key: event.detail.episodeS3Key,
-  });
+const imageGenerationHandler = async (
+  event: ImageGenerationEvent,
+  correlationId: string
+): Promise<void> => {
+  ErrorLogger.logInfo(
+    "Image Generation Lambda invoked",
+    {
+      source: event.source,
+      detailType: event["detail-type"],
+      userId: event.detail.userId,
+      episodeId: event.detail.episodeId,
+      episodeS3Key: event.detail.episodeS3Key,
+      correlationId,
+    },
+    "ImageGeneration"
+  );
 
   const { userId, episodeId, episodeS3Key } = event.detail;
 
@@ -493,3 +506,9 @@ function extractVisualDescription(sceneContent: string): string {
 
   return finalDescription;
 }
+
+// Export the handler wrapped with error handling
+export const handler = withErrorHandling(
+  imageGenerationHandler,
+  "ImageGeneration"
+);

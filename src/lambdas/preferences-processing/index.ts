@@ -9,6 +9,11 @@ import { UserPreferencesData, QlooInsights } from "../../types/data-models";
 import { QlooApiClient } from "./qloo-client"; // cspell:ignore qloo
 import { validatePreferences } from "./validation";
 import { createErrorResponse, createSuccessResponse } from "./response-utils";
+import {
+  withErrorHandling,
+  CorrelationContext,
+  ErrorLogger,
+} from "../../utils/error-handler";
 
 /**
  * Preferences Processing Lambda Function
@@ -30,14 +35,20 @@ interface PreferencesProcessingEvent extends APIGatewayProxyEvent {
   };
 }
 
-export const handler = async (
-  event: PreferencesProcessingEvent
+const preferencesProcessingHandler = async (
+  event: PreferencesProcessingEvent,
+  correlationId: string
 ): Promise<APIGatewayProxyResult> => {
-  console.log("Preferences Processing Lambda invoked", {
-    requestId: event.requestContext.requestId,
-    httpMethod: event.httpMethod,
-    path: event.path,
-  });
+  ErrorLogger.logInfo(
+    "Preferences Processing Lambda invoked",
+    {
+      requestId: event.requestContext.requestId,
+      httpMethod: event.httpMethod,
+      path: event.path,
+      correlationId,
+    },
+    "PreferencesProcessing"
+  );
 
   try {
     // Extract user ID from Cognito claims
@@ -80,17 +91,22 @@ export const handler = async (
     const requestId = uuidv4();
     const timestamp = new Date().toISOString();
 
-    console.log("Processing preferences for user", {
-      userId,
-      requestId,
-      preferences: {
-        genres: preferences.genres,
-        themes: preferences.themes,
-        artStyle: preferences.artStyle,
-        targetAudience: preferences.targetAudience,
-        contentRating: preferences.contentRating,
+    ErrorLogger.logInfo(
+      "Processing preferences for user",
+      {
+        userId,
+        requestId,
+        correlationId,
+        preferences: {
+          genres: preferences.genres,
+          themes: preferences.themes,
+          artStyle: preferences.artStyle,
+          targetAudience: preferences.targetAudience,
+          contentRating: preferences.contentRating,
+        },
       },
-    });
+      "PreferencesProcessing"
+    );
 
     // Create generation request record
     await GenerationRequestAccess.create({
@@ -212,11 +228,11 @@ export const handler = async (
       estimatedCompletionTime: "2-3 minutes",
     });
   } catch (error) {
-    console.error("Unexpected error in preferences processing", {
-      requestId: event.requestContext.requestId,
-      error: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : undefined,
-    });
+    ErrorLogger.logError(
+      error instanceof Error ? error : new Error(String(error)),
+      { requestId: event.requestContext.requestId, correlationId },
+      "PreferencesProcessing"
+    );
 
     return createErrorResponse(
       500,
@@ -225,3 +241,9 @@ export const handler = async (
     );
   }
 };
+
+// Export the handler wrapped with error handling
+export const handler = withErrorHandling(
+  preferencesProcessingHandler,
+  "PreferencesProcessing"
+);

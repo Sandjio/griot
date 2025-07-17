@@ -1,5 +1,9 @@
 import { QlooApiClient, QlooApiError, MockQlooApiClient } from "../qloo-client";
 import { UserPreferencesData } from "../../../types/data-models";
+import {
+  CircuitBreakerRegistry,
+  CorrelationContext,
+} from "../../../utils/error-handler";
 
 // Mock fetch globally
 global.fetch = jest.fn();

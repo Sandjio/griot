@@ -7,6 +7,14 @@ import {
   QlooInsights,
   BedrockResponse,
 } from "../../types/data-models";
+import {
+  CircuitBreakerRegistry,
+  RetryHandler,
+  EXTERNAL_API_RETRY_CONFIG,
+  ErrorLogger,
+  CorrelationContext,
+} from "../../utils/error-handler";
+import { ErrorUtils } from "../../types/error-types";
 
 /**
  * Amazon Bedrock Client for Story Generation
@@ -17,6 +25,8 @@ import {
 export class BedrockClient {
   private client: BedrockRuntimeClient;
   private modelId: string;
+  private circuitBreaker;
+  private retryHandler;
 
   constructor() {
     this.client = new BedrockRuntimeClient({
@@ -24,6 +34,20 @@ export class BedrockClient {
         process.env.BEDROCK_REGION || process.env.AWS_REGION || "us-east-1",
     });
     this.modelId = "anthropic.claude-3-sonnet-20240229-v1:0";
+
+    // Initialize circuit breaker for Bedrock story generation
+    this.circuitBreaker = CircuitBreakerRegistry.getOrCreate(
+      "bedrock-story-generation",
+      {
+        failureThreshold: 5,
+        recoveryTimeoutMs: 60000, // 1 minute
+        monitoringPeriodMs: 300000, // 5 minutes
+        halfOpenMaxCalls: 3,
+      }
+    );
+
+    // Initialize retry handler with external API configuration
+    this.retryHandler = new RetryHandler(EXTERNAL_API_RETRY_CONFIG);
   }
 
   /**
@@ -33,106 +57,189 @@ export class BedrockClient {
     preferences: UserPreferencesData,
     insights: QlooInsights
   ): Promise<BedrockResponse> {
+    const correlationId = CorrelationContext.getCorrelationId();
     const prompt = this.buildStoryPrompt(preferences, insights);
 
-    console.log("Generating story with Bedrock", {
-      modelId: this.modelId,
-      promptLength: prompt.length,
-      preferences: {
-        genres: preferences.genres,
-        themes: preferences.themes,
-        artStyle: preferences.artStyle,
-        targetAudience: preferences.targetAudience,
-        contentRating: preferences.contentRating,
+    ErrorLogger.logInfo(
+      "Generating story with Bedrock",
+      {
+        modelId: this.modelId,
+        promptLength: prompt.length,
+        preferences: {
+          genres: preferences.genres,
+          themes: preferences.themes,
+          artStyle: preferences.artStyle,
+          targetAudience: preferences.targetAudience,
+          contentRating: preferences.contentRating,
+        },
+        correlationId,
       },
-    });
+      "BedrockClient.generateStory"
+    );
 
     try {
-      const requestBody = {
-        anthropic_version: "bedrock-2023-05-31",
-        max_tokens: 4000,
-        temperature: 0.7,
-        messages: [
-          {
-            role: "user",
-            content: prompt,
-          },
-        ],
-      };
-
-      const command = new InvokeModelCommand({
-        modelId: this.modelId,
-        body: JSON.stringify(requestBody),
-        contentType: "application/json",
-        accept: "application/json",
+      // Use circuit breaker with retry handler
+      return await this.circuitBreaker.execute(async () => {
+        return await this.retryHandler.execute(async () => {
+          return await this.makeBedrockCall(prompt);
+        }, "BedrockStoryGeneration");
       });
+    } catch (error) {
+      // Convert to standardized error format
+      const standardError = this.handleBedrockError(error, correlationId);
+      ErrorLogger.logError(
+        standardError,
+        { preferences, insights },
+        "BedrockClient.generateStory"
+      );
+      throw standardError;
+    }
+  }
 
-      const response = await this.client.send(command);
+  /**
+   * Make the actual Bedrock API call
+   */
+  private async makeBedrockCall(prompt: string): Promise<BedrockResponse> {
+    const requestBody = {
+      anthropic_version: "bedrock-2023-05-31",
+      max_tokens: 4000,
+      temperature: 0.7,
+      messages: [
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+    };
 
-      if (!response.body) {
-        throw new Error("No response body received from Bedrock");
-      }
+    const command = new InvokeModelCommand({
+      modelId: this.modelId,
+      body: JSON.stringify(requestBody),
+      contentType: "application/json",
+      accept: "application/json",
+    });
 
-      // Parse the response
-      const responseBody = JSON.parse(new TextDecoder().decode(response.body));
+    const response = await this.client.send(command);
 
-      if (
-        !responseBody.content ||
-        !responseBody.content[0] ||
-        !responseBody.content[0].text
-      ) {
-        throw new Error("Invalid response format from Bedrock");
-      }
+    if (!response.body) {
+      throw new Error("No response body received from Bedrock");
+    }
 
-      const content = responseBody.content[0].text;
-      const usage = responseBody.usage
-        ? {
-            inputTokens: responseBody.usage.input_tokens || 0,
-            outputTokens: responseBody.usage.output_tokens || 0,
-          }
-        : undefined;
+    // Parse the response
+    const responseBody = JSON.parse(new TextDecoder().decode(response.body));
 
-      console.log("Successfully generated story content", {
+    if (
+      !responseBody.content ||
+      !responseBody.content[0] ||
+      !responseBody.content[0].text
+    ) {
+      throw new Error("Invalid response format from Bedrock");
+    }
+
+    const content = responseBody.content[0].text;
+    const usage = responseBody.usage
+      ? {
+          inputTokens: responseBody.usage.input_tokens || 0,
+          outputTokens: responseBody.usage.output_tokens || 0,
+        }
+      : undefined;
+
+    ErrorLogger.logInfo(
+      "Successfully generated story content",
+      {
         contentLength: content.length,
         inputTokens: usage?.inputTokens,
         outputTokens: usage?.outputTokens,
-      });
+      },
+      "BedrockClient.makeBedrockCall"
+    );
 
-      return {
-        content,
-        usage,
-      };
-    } catch (error) {
-      console.error("Error generating story with Bedrock", {
-        error: error instanceof Error ? error.message : String(error),
-        modelId: this.modelId,
-      });
+    return {
+      content,
+      usage,
+    };
+  }
 
-      // Handle specific Bedrock errors
-      if (error instanceof Error) {
-        if (error.message.includes("throttling")) {
-          throw new Error(
-            "Bedrock service is currently throttled. Please try again later."
-          );
-        }
-        if (error.message.includes("content filter")) {
-          throw new Error(
-            "Generated content was filtered. Please adjust your preferences and try again."
-          );
-        }
-        if (error.message.includes("model not found")) {
-          throw new Error(
-            "The specified Bedrock model is not available in this region."
-          );
-        }
+  /**
+   * Handle Bedrock-specific errors and convert to standardized format
+   */
+  private handleBedrockError(error: any, correlationId: string): Error {
+    if (error instanceof Error) {
+      if (
+        error.message.includes("throttling") ||
+        error.message.includes("ThrottlingException")
+      ) {
+        return ErrorUtils.createError(
+          "THROTTLING_ERROR",
+          "Bedrock service is currently throttled. Please try again later.",
+          {
+            service: "bedrock",
+            operation: "generateStory",
+            retryable: true,
+          },
+          correlationId
+        );
       }
-
-      throw new Error(
-        `Failed to generate story content: ${
-          error instanceof Error ? error.message : String(error)
-        }`
-      );
+      if (
+        error.message.includes("content filter") ||
+        error.message.includes("ContentPolicyViolation")
+      ) {
+        return ErrorUtils.createError(
+          "EXTERNAL_SERVICE_ERROR",
+          "Generated content was filtered. Please adjust your preferences and try again.",
+          {
+            service: "bedrock",
+            operation: "generateStory",
+            retryable: false,
+          },
+          correlationId
+        );
+      }
+      if (
+        error.message.includes("model not found") ||
+        error.message.includes("ModelNotFound")
+      ) {
+        return ErrorUtils.createError(
+          "EXTERNAL_SERVICE_ERROR",
+          "The specified Bedrock model is not available in this region.",
+          {
+            service: "bedrock",
+            operation: "generateStory",
+            retryable: false,
+          },
+          correlationId
+        );
+      }
+      if (
+        error.message.includes("timeout") ||
+        error.message.includes("TimeoutError")
+      ) {
+        return ErrorUtils.createError(
+          "TIMEOUT_ERROR",
+          "Bedrock request timed out.",
+          {
+            service: "bedrock",
+            operation: "generateStory",
+            retryable: true,
+          },
+          correlationId
+        );
+      }
     }
+
+    // Default to external service error
+    return ErrorUtils.createError(
+      "EXTERNAL_SERVICE_ERROR",
+      `Failed to generate story content: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+      {
+        service: "bedrock",
+        operation: "generateStory",
+        retryable: true,
+      },
+      correlationId
+    );
   }
 
   /**
@@ -234,54 +341,5 @@ Please generate a complete manga story now:`;
     }
 
     return true;
-  }
-
-  /**
-   * Retry story generation with modified parameters if needed
-   */
-  async generateStoryWithRetry(
-    preferences: UserPreferencesData,
-    insights: QlooInsights,
-    maxRetries: number = 2
-  ): Promise<BedrockResponse> {
-    let lastError: Error | null = null;
-
-    for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
-      try {
-        const result = await this.generateStory(preferences, insights);
-
-        // Validate the generated content
-        if (this.validateGeneratedContent(result.content, preferences)) {
-          return result;
-        } else {
-          throw new Error("Generated content failed validation checks");
-        }
-      } catch (error) {
-        lastError = error instanceof Error ? error : new Error(String(error));
-
-        console.warn(`Story generation attempt ${attempt} failed`, {
-          error: lastError.message,
-          attempt,
-          maxRetries: maxRetries + 1,
-        });
-
-        // Don't retry on certain errors
-        if (
-          lastError.message.includes("content filter") ||
-          lastError.message.includes("model not found")
-        ) {
-          throw lastError;
-        }
-
-        // Wait before retry (exponential backoff)
-        if (attempt <= maxRetries) {
-          const waitTime = Math.pow(2, attempt - 1) * 1000; // 1s, 2s, 4s...
-          console.log(`Waiting ${waitTime}ms before retry...`);
-          await new Promise((resolve) => setTimeout(resolve, waitTime));
-        }
-      }
-    }
-
-    throw lastError || new Error("Story generation failed after all retries");
   }
 }
