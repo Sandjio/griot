@@ -81,7 +81,7 @@
   - Write integration tests for API endpoints
   - _Requirements: 6.3, 6.4, 6.5, 6.6_
 
-- [ ] 11. Implement Story Generation Lambda function
+- [x] 11. Implement Story Generation Lambda function
 
   - Create Lambda function to handle story generation events from EventBridge
   - Implement Amazon Bedrock integration for story content generation
