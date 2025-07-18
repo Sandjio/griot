@@ -15,6 +15,7 @@ export interface ProcessingStackProps extends cdk.StackProps {
   contentBucket: s3.Bucket;
   eventBus: events.EventBus;
   eventBridgeConstruct: EventBridgeConstruct;
+  securityConstruct: SecurityConstruct;
   vpc?: ec2.Vpc;
 }
 
@@ -34,14 +35,8 @@ export class ProcessingStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: ProcessingStackProps) {
     super(scope, id, props);
 
-    // Initialize Security Construct
-    this.securityConstruct = new SecurityConstruct(this, "SecurityConstruct", {
-      environment: props.environment,
-      mangaTable: props.mangaTable,
-      contentBucket: props.contentBucket,
-      eventBus: props.eventBus,
-      vpc: props.vpc,
-    });
+    // Use Security Construct from props
+    this.securityConstruct = props.securityConstruct;
 
     // Create Lambda functions with security configurations
     this.createStoryGenerationLambda(props);
@@ -49,7 +44,8 @@ export class ProcessingStack extends cdk.Stack {
     this.createImageGenerationLambda(props);
 
     // Configure EventBridge rules to trigger Lambda functions
-    this.configureEventBridgeRules(props);
+    // Note: EventBridge rules configuration is commented out to avoid circular dependencies
+    // this.configureEventBridgeRules(props);
   }
 
   /**

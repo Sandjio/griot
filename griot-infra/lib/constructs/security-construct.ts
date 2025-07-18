@@ -37,9 +37,9 @@ export class SecurityConstruct extends Construct {
     super(scope, id);
 
     // Create VPC endpoints for internal service communication if VPC is provided
-    if (props.vpc) {
-      this.createVpcEndpoints(props.vpc, props.environment);
-    }
+    // if (props.vpc) {
+    //   this.createVpcEndpoints(props.vpc, props.environment);
+    // }
 
     // Create least-privilege IAM roles for each Lambda function
     this.createLambdaRoles(props);
@@ -51,227 +51,227 @@ export class SecurityConstruct extends Construct {
   /**
    * Create VPC endpoints for secure internal service communication
    */
-  private createVpcEndpoints(vpc: ec2.Vpc, environment: string): void {
-    // DynamoDB VPC Endpoint
-    this.vpcEndpoints.dynamodb = new ec2.VpcEndpoint(this, "DynamoDBEndpoint", {
-      vpc,
-      service: ec2.VpcEndpointService.DYNAMODB,
-      vpcEndpointType: ec2.VpcEndpointType.GATEWAY,
-      routeTableIds: vpc.privateSubnets.map(
-        (subnet) => subnet.routeTable.routeTableId
-      ),
-      policyDocument: new iam.PolicyDocument({
-        statements: [
-          new iam.PolicyStatement({
-            effect: iam.Effect.ALLOW,
-            principals: [new iam.AnyPrincipal()],
-            actions: [
-              "dynamodb:GetItem",
-              "dynamodb:PutItem",
-              "dynamodb:UpdateItem",
-              "dynamodb:DeleteItem",
-              "dynamodb:Query",
-              "dynamodb:Scan",
-              "dynamodb:BatchGetItem",
-              "dynamodb:BatchWriteItem",
-            ],
-            resources: ["*"],
-            conditions: {
-              StringEquals: {
-                "aws:PrincipalTag/Environment": environment,
-              },
-            },
-          }),
-        ],
-      }),
-    });
+  // private createVpcEndpoints(vpc: ec2.Vpc, environment: string): void {
+  // DynamoDB VPC Endpoint
+  // this.vpcEndpoints.dynamodb = new ec2.VpcEndpoint(this, "DynamoDBEndpoint", {
+  //   vpc,
+  //   service: ec2.VpcEndpointService.DYNAMODB,
+  //   vpcEndpointType: ec2.VpcEndpointType.GATEWAY,
+  //   routeTableIds: vpc.privateSubnets.map(
+  //     (subnet) => subnet.routeTable.routeTableId
+  //   ),
+  //   policyDocument: new iam.PolicyDocument({
+  //     statements: [
+  //       new iam.PolicyStatement({
+  //         effect: iam.Effect.ALLOW,
+  //         principals: [new iam.AnyPrincipal()],
+  //         actions: [
+  //           "dynamodb:GetItem",
+  //           "dynamodb:PutItem",
+  //           "dynamodb:UpdateItem",
+  //           "dynamodb:DeleteItem",
+  //           "dynamodb:Query",
+  //           "dynamodb:Scan",
+  //           "dynamodb:BatchGetItem",
+  //           "dynamodb:BatchWriteItem",
+  //         ],
+  //         resources: ["*"],
+  //         conditions: {
+  //           StringEquals: {
+  //             "aws:PrincipalTag/Environment": environment,
+  //           },
+  //         },
+  //       }),
+  //     ],
+  //   }),
+  // });
 
-    // S3 VPC Endpoint
-    this.vpcEndpoints.s3 = new ec2.VpcEndpoint(this, "S3Endpoint", {
-      vpc,
-      service: ec2.VpcEndpointService.S3,
-      vpcEndpointType: ec2.VpcEndpointType.GATEWAY,
-      routeTableIds: vpc.privateSubnets.map(
-        (subnet) => subnet.routeTable.routeTableId
-      ),
-      policyDocument: new iam.PolicyDocument({
-        statements: [
-          new iam.PolicyStatement({
-            effect: iam.Effect.ALLOW,
-            principals: [new iam.AnyPrincipal()],
-            actions: [
-              "s3:GetObject",
-              "s3:PutObject",
-              "s3:DeleteObject",
-              "s3:ListBucket",
-              "s3:GetObjectVersion",
-              "s3:PutObjectAcl",
-              "s3:GetObjectAcl",
-            ],
-            resources: ["*"],
-            conditions: {
-              StringEquals: {
-                "aws:PrincipalTag/Environment": environment,
-              },
-            },
-          }),
-        ],
-      }),
-    });
+  // S3 VPC Endpoint
+  // this.vpcEndpoints.s3 = new ec2.VpcEndpoint(this, "S3Endpoint", {
+  //   vpc,
+  //   service: ec2.VpcEndpointService.S3,
+  //   vpcEndpointType: ec2.VpcEndpointType.GATEWAY,
+  //   routeTableIds: vpc.privateSubnets.map(
+  //     (subnet) => subnet.routeTable.routeTableId
+  //   ),
+  //   policyDocument: new iam.PolicyDocument({
+  //     statements: [
+  //       new iam.PolicyStatement({
+  //         effect: iam.Effect.ALLOW,
+  //         principals: [new iam.AnyPrincipal()],
+  //         actions: [
+  //           "s3:GetObject",
+  //           "s3:PutObject",
+  //           "s3:DeleteObject",
+  //           "s3:ListBucket",
+  //           "s3:GetObjectVersion",
+  //           "s3:PutObjectAcl",
+  //           "s3:GetObjectAcl",
+  //         ],
+  //         resources: ["*"],
+  //         conditions: {
+  //           StringEquals: {
+  //             "aws:PrincipalTag/Environment": environment,
+  //           },
+  //         },
+  //       }),
+  //     ],
+  //   }),
+  // });
 
-    // EventBridge VPC Endpoint
-    this.vpcEndpoints.eventbridge = new ec2.VpcEndpoint(
-      this,
-      "EventBridgeEndpoint",
-      {
-        vpc,
-        service: ec2.VpcEndpointService.EVENTBRIDGE,
-        vpcEndpointType: ec2.VpcEndpointType.INTERFACE,
-        subnets: {
-          subnets: vpc.privateSubnets,
-        },
-        securityGroups: [this.createVpcEndpointSecurityGroup(vpc, environment)],
-        policyDocument: new iam.PolicyDocument({
-          statements: [
-            new iam.PolicyStatement({
-              effect: iam.Effect.ALLOW,
-              principals: [new iam.AnyPrincipal()],
-              actions: ["events:PutEvents", "events:List*", "events:Describe*"],
-              resources: ["*"],
-              conditions: {
-                StringEquals: {
-                  "aws:PrincipalTag/Environment": environment,
-                },
-              },
-            }),
-          ],
-        }),
-      }
-    );
+  // EventBridge VPC Endpoint
+  // this.vpcEndpoints.eventbridge = new ec2.VpcEndpoint(
+  //   this,
+  //   "EventBridgeEndpoint",
+  //   {
+  //     vpc,
+  //     service: ec2.VpcEndpointService.EVENTBRIDGE,
+  //     vpcEndpointType: ec2.VpcEndpointType.INTERFACE,
+  //     subnets: {
+  //       subnets: vpc.privateSubnets,
+  //     },
+  //     securityGroups: [this.createVpcEndpointSecurityGroup(vpc, environment)],
+  //     policyDocument: new iam.PolicyDocument({
+  //       statements: [
+  //         new iam.PolicyStatement({
+  //           effect: iam.Effect.ALLOW,
+  //           principals: [new iam.AnyPrincipal()],
+  //           actions: ["events:PutEvents", "events:List*", "events:Describe*"],
+  //           resources: ["*"],
+  //           conditions: {
+  //             StringEquals: {
+  //               "aws:PrincipalTag/Environment": environment,
+  //             },
+  //           },
+  //         }),
+  //       ],
+  //     }),
+  //   }
+  // );
 
-    // Bedrock VPC Endpoint
-    this.vpcEndpoints.bedrock = new ec2.VpcEndpoint(this, "BedrockEndpoint", {
-      vpc,
-      service: new ec2.VpcEndpointService(
-        `com.amazonaws.${cdk.Stack.of(this).region}.bedrock-runtime`
-      ),
-      vpcEndpointType: ec2.VpcEndpointType.INTERFACE,
-      subnets: {
-        subnets: vpc.privateSubnets,
-      },
-      securityGroups: [this.createVpcEndpointSecurityGroup(vpc, environment)],
-      policyDocument: new iam.PolicyDocument({
-        statements: [
-          new iam.PolicyStatement({
-            effect: iam.Effect.ALLOW,
-            principals: [new iam.AnyPrincipal()],
-            actions: [
-              "bedrock:InvokeModel",
-              "bedrock:InvokeModelWithResponseStream",
-            ],
-            resources: ["*"],
-            conditions: {
-              StringEquals: {
-                "aws:PrincipalTag/Environment": environment,
-              },
-            },
-          }),
-        ],
-      }),
-    });
+  // Bedrock VPC Endpoint
+  // this.vpcEndpoints.bedrock = new ec2.VpcEndpoint(this, "BedrockEndpoint", {
+  //   vpc,
+  //   service: new ec2.VpcEndpointService(
+  //     `com.amazonaws.${cdk.Stack.of(this).region}.bedrock-runtime`
+  //   ),
+  //   vpcEndpointType: ec2.VpcEndpointType.INTERFACE,
+  //   subnets: {
+  //     subnets: vpc.privateSubnets,
+  //   },
+  //   securityGroups: [this.createVpcEndpointSecurityGroup(vpc, environment)],
+  //   policyDocument: new iam.PolicyDocument({
+  //     statements: [
+  //       new iam.PolicyStatement({
+  //         effect: iam.Effect.ALLOW,
+  //         principals: [new iam.AnyPrincipal()],
+  //         actions: [
+  //           "bedrock:InvokeModel",
+  //           "bedrock:InvokeModelWithResponseStream",
+  //         ],
+  //         resources: ["*"],
+  //         conditions: {
+  //           StringEquals: {
+  //             "aws:PrincipalTag/Environment": environment,
+  //           },
+  //         },
+  //       }),
+  //     ],
+  //   }),
+  // });
 
-    // CloudWatch Logs VPC Endpoint
-    this.vpcEndpoints.logs = new ec2.VpcEndpoint(this, "LogsEndpoint", {
-      vpc,
-      service: ec2.VpcEndpointService.CLOUDWATCH_LOGS,
-      vpcEndpointType: ec2.VpcEndpointType.INTERFACE,
-      subnets: {
-        subnets: vpc.privateSubnets,
-      },
-      securityGroups: [this.createVpcEndpointSecurityGroup(vpc, environment)],
-      policyDocument: new iam.PolicyDocument({
-        statements: [
-          new iam.PolicyStatement({
-            effect: iam.Effect.ALLOW,
-            principals: [new iam.AnyPrincipal()],
-            actions: [
-              "logs:CreateLogGroup",
-              "logs:CreateLogStream",
-              "logs:PutLogEvents",
-              "logs:DescribeLogGroups",
-              "logs:DescribeLogStreams",
-            ],
-            resources: ["*"],
-            conditions: {
-              StringEquals: {
-                "aws:PrincipalTag/Environment": environment,
-              },
-            },
-          }),
-        ],
-      }),
-    });
+  // CloudWatch Logs VPC Endpoint
+  // this.vpcEndpoints.logs = new ec2.VpcEndpoint(this, "LogsEndpoint", {
+  //   vpc,
+  //   service: ec2.VpcEndpointService.CLOUDWATCH_LOGS,
+  //   vpcEndpointType: ec2.VpcEndpointType.INTERFACE,
+  //   subnets: {
+  //     subnets: vpc.privateSubnets,
+  //   },
+  //   securityGroups: [this.createVpcEndpointSecurityGroup(vpc, environment)],
+  //   policyDocument: new iam.PolicyDocument({
+  //     statements: [
+  //       new iam.PolicyStatement({
+  //         effect: iam.Effect.ALLOW,
+  //         principals: [new iam.AnyPrincipal()],
+  //         actions: [
+  //           "logs:CreateLogGroup",
+  //           "logs:CreateLogStream",
+  //           "logs:PutLogEvents",
+  //           "logs:DescribeLogGroups",
+  //           "logs:DescribeLogStreams",
+  //         ],
+  //         resources: ["*"],
+  //         conditions: {
+  //           StringEquals: {
+  //             "aws:PrincipalTag/Environment": environment,
+  //           },
+  //         },
+  //       }),
+  //     ],
+  //   }),
+  // });
 
-    // CloudWatch Monitoring VPC Endpoint
-    this.vpcEndpoints.monitoring = new ec2.VpcEndpoint(
-      this,
-      "MonitoringEndpoint",
-      {
-        vpc,
-        service: ec2.VpcEndpointService.CLOUDWATCH_MONITORING,
-        vpcEndpointType: ec2.VpcEndpointType.INTERFACE,
-        subnets: {
-          subnets: vpc.privateSubnets,
-        },
-        securityGroups: [this.createVpcEndpointSecurityGroup(vpc, environment)],
-        policyDocument: new iam.PolicyDocument({
-          statements: [
-            new iam.PolicyStatement({
-              effect: iam.Effect.ALLOW,
-              principals: [new iam.AnyPrincipal()],
-              actions: [
-                "cloudwatch:PutMetricData",
-                "cloudwatch:GetMetricStatistics",
-                "cloudwatch:ListMetrics",
-              ],
-              resources: ["*"],
-              conditions: {
-                StringEquals: {
-                  "aws:PrincipalTag/Environment": environment,
-                },
-              },
-            }),
-          ],
-        }),
-      }
-    );
+  // CloudWatch Monitoring VPC Endpoint
+  // this.vpcEndpoints.monitoring = new ec2.VpcEndpoint(
+  //   this,
+  //   "MonitoringEndpoint",
+  //   {
+  //     vpc,
+  //     service: ec2.VpcEndpointService.CLOUDWATCH_MONITORING,
+  //     vpcEndpointType: ec2.VpcEndpointType.INTERFACE,
+  //     subnets: {
+  //       subnets: vpc.privateSubnets,
+  //     },
+  //     securityGroups: [this.createVpcEndpointSecurityGroup(vpc, environment)],
+  //     policyDocument: new iam.PolicyDocument({
+  //       statements: [
+  //         new iam.PolicyStatement({
+  //           effect: iam.Effect.ALLOW,
+  //           principals: [new iam.AnyPrincipal()],
+  //           actions: [
+  //             "cloudwatch:PutMetricData",
+  //             "cloudwatch:GetMetricStatistics",
+  //             "cloudwatch:ListMetrics",
+  //           ],
+  //           resources: ["*"],
+  //           conditions: {
+  //             StringEquals: {
+  //               "aws:PrincipalTag/Environment": environment,
+  //             },
+  //           },
+  //         }),
+  //       ],
+  //     }),
+  //   }
+  // );
 
-    // X-Ray VPC Endpoint
-    this.vpcEndpoints.xray = new ec2.VpcEndpoint(this, "XRayEndpoint", {
-      vpc,
-      service: ec2.VpcEndpointService.XRAY,
-      vpcEndpointType: ec2.VpcEndpointType.INTERFACE,
-      subnets: {
-        subnets: vpc.privateSubnets,
-      },
-      securityGroups: [this.createVpcEndpointSecurityGroup(vpc, environment)],
-      policyDocument: new iam.PolicyDocument({
-        statements: [
-          new iam.PolicyStatement({
-            effect: iam.Effect.ALLOW,
-            principals: [new iam.AnyPrincipal()],
-            actions: ["xray:PutTraceSegments", "xray:PutTelemetryRecords"],
-            resources: ["*"],
-            conditions: {
-              StringEquals: {
-                "aws:PrincipalTag/Environment": environment,
-              },
-            },
-          }),
-        ],
-      }),
-    });
-  }
+  // X-Ray VPC Endpoint
+  //   this.vpcEndpoints.xray = new ec2.VpcEndpoint(this, "XRayEndpoint", {
+  //     vpc,
+  //     service: ec2.VpcEndpointService.XRAY,
+  //     vpcEndpointType: ec2.VpcEndpointType.INTERFACE,
+  //     subnets: {
+  //       subnets: vpc.privateSubnets,
+  //     },
+  //     securityGroups: [this.createVpcEndpointSecurityGroup(vpc, environment)],
+  //     policyDocument: new iam.PolicyDocument({
+  //       statements: [
+  //         new iam.PolicyStatement({
+  //           effect: iam.Effect.ALLOW,
+  //           principals: [new iam.AnyPrincipal()],
+  //           actions: ["xray:PutTraceSegments", "xray:PutTelemetryRecords"],
+  //           resources: ["*"],
+  //           conditions: {
+  //             StringEquals: {
+  //               "aws:PrincipalTag/Environment": environment,
+  //             },
+  //           },
+  //         }),
+  //       ],
+  //     }),
+  //   });
+  // }
 
   /**
    * Create security group for VPC endpoints
@@ -354,7 +354,8 @@ export class SecurityConstruct extends Construct {
     });
 
     // Post Authentication Trigger Role
-    this.postAuthTriggerRole = new iam.Role(this, "PostAuthTriggerRole", {
+    // Assign to a local variable first, then assign to the readonly property only once in the constructor
+    const postAuthTriggerRole = new iam.Role(this, "PostAuthTriggerRole", {
       roleName: `manga-post-auth-role-${props.environment}`,
       assumedBy: new iam.ServicePrincipal("lambda.amazonaws.com"),
       description: "IAM role for Post Authentication Trigger Lambda",
@@ -383,15 +384,18 @@ export class SecurityConstruct extends Construct {
           ],
         }),
       },
-      tags: {
-        Environment: props.environment,
-        Service: "MangaPlatform",
-        Function: "PostAuthTrigger",
-      },
+      // tags: {
+      //   Environment: props.environment,
+      //   Service: "MangaPlatform",
+      //   Function: "PostAuthTrigger",
+      // },
     });
+    // Assign to the readonly property only once in the constructor
+    (this as { postAuthTriggerRole: iam.Role }).postAuthTriggerRole =
+      postAuthTriggerRole;
 
     // Preferences Processing Role
-    this.preferencesProcessingRole = new iam.Role(
+    const preferencesProcessingRole = new iam.Role(
       this,
       "PreferencesProcessingRole",
       {
@@ -450,16 +454,15 @@ export class SecurityConstruct extends Construct {
             ],
           }),
         },
-        tags: {
-          Environment: props.environment,
-          Service: "MangaPlatform",
-          Function: "PreferencesProcessing",
-        },
+        // Tags will be added after role creation
       }
     );
+    (
+      this as { preferencesProcessingRole: iam.Role }
+    ).preferencesProcessingRole = preferencesProcessingRole;
 
     // Story Generation Role
-    this.storyGenerationRole = new iam.Role(this, "StoryGenerationRole", {
+    const storyGenerationRole = new iam.Role(this, "StoryGenerationRole", {
       roleName: `manga-story-generation-role-${props.environment}`,
       assumedBy: new iam.ServicePrincipal("lambda.amazonaws.com"),
       description: "IAM role for Story Generation Lambda",
@@ -524,15 +527,17 @@ export class SecurityConstruct extends Construct {
           ],
         }),
       },
-      tags: {
-        Environment: props.environment,
-        Service: "MangaPlatform",
-        Function: "StoryGeneration",
-      },
+      // tags: {
+      //   Environment: props.environment,
+      //   Service: "MangaPlatform",
+      //   Function: "StoryGeneration",
+      // },
     });
+    (this as { storyGenerationRole: iam.Role }).storyGenerationRole =
+      storyGenerationRole;
 
     // Episode Generation Role
-    this.episodeGenerationRole = new iam.Role(this, "EpisodeGenerationRole", {
+    const episodeGenerationRole = new iam.Role(this, "EpisodeGenerationRole", {
       roleName: `manga-episode-generation-role-${props.environment}`,
       assumedBy: new iam.ServicePrincipal("lambda.amazonaws.com"),
       description: "IAM role for Episode Generation Lambda",
@@ -602,15 +607,17 @@ export class SecurityConstruct extends Construct {
           ],
         }),
       },
-      tags: {
-        Environment: props.environment,
-        Service: "MangaPlatform",
-        Function: "EpisodeGeneration",
-      },
+      // tags: {
+      //   Environment: props.environment,
+      //   Service: "MangaPlatform",
+      //   Function: "EpisodeGeneration",
+      // },
     });
+    (this as { episodeGenerationRole: iam.Role }).episodeGenerationRole =
+      episodeGenerationRole;
 
     // Image Generation Role
-    this.imageGenerationRole = new iam.Role(this, "ImageGenerationRole", {
+    const imageGenerationRole = new iam.Role(this, "ImageGenerationRole", {
       roleName: `manga-image-generation-role-${props.environment}`,
       assumedBy: new iam.ServicePrincipal("lambda.amazonaws.com"),
       description: "IAM role for Image Generation Lambda",
@@ -682,15 +689,17 @@ export class SecurityConstruct extends Construct {
           ],
         }),
       },
-      tags: {
-        Environment: props.environment,
-        Service: "MangaPlatform",
-        Function: "ImageGeneration",
-      },
+      // tags: {
+      //   Environment: props.environment,
+      //   Service: "MangaPlatform",
+      //   Function: "ImageGeneration",
+      // },
     });
+    (this as { imageGenerationRole: iam.Role }).imageGenerationRole =
+      imageGenerationRole;
 
     // Content Retrieval Role
-    this.contentRetrievalRole = new iam.Role(this, "ContentRetrievalRole", {
+    const contentRetrievalRole = new iam.Role(this, "ContentRetrievalRole", {
       roleName: `manga-content-retrieval-role-${props.environment}`,
       assumedBy: new iam.ServicePrincipal("lambda.amazonaws.com"),
       description: "IAM role for Content Retrieval Lambda",
@@ -740,15 +749,17 @@ export class SecurityConstruct extends Construct {
           ],
         }),
       },
-      tags: {
-        Environment: props.environment,
-        Service: "MangaPlatform",
-        Function: "ContentRetrieval",
-      },
+      // tags: {
+      //   Environment: props.environment,
+      //   Service: "MangaPlatform",
+      //   Function: "ContentRetrieval",
+      // },
     });
+    (this as { contentRetrievalRole: iam.Role }).contentRetrievalRole =
+      contentRetrievalRole;
 
     // Status Check Role
-    this.statusCheckRole = new iam.Role(this, "StatusCheckRole", {
+    const statusCheckRole = new iam.Role(this, "StatusCheckRole", {
       roleName: `manga-status-check-role-${props.environment}`,
       assumedBy: new iam.ServicePrincipal("lambda.amazonaws.com"),
       description: "IAM role for Status Check Lambda",
@@ -784,12 +795,13 @@ export class SecurityConstruct extends Construct {
           ],
         }),
       },
-      tags: {
-        Environment: props.environment,
-        Service: "MangaPlatform",
-        Function: "StatusCheck",
-      },
+      // tags: {
+      //   Environment: props.environment,
+      //   Service: "MangaPlatform",
+      //   Function: "StatusCheck",
+      // },
     });
+    (this as { statusCheckRole: iam.Role }).statusCheckRole = statusCheckRole;
   }
 
   /**
@@ -828,31 +840,17 @@ export class SecurityConstruct extends Construct {
             },
           },
         }),
-        // Allow Lambda functions to access their specific paths
-        new iam.PolicyStatement({
-          sid: "AllowLambdaAccess",
-          effect: iam.Effect.ALLOW,
-          principals: [
-            new iam.ArnPrincipal(this.storyGenerationRole.roleArn),
-            new iam.ArnPrincipal(this.episodeGenerationRole.roleArn),
-            new iam.ArnPrincipal(this.imageGenerationRole.roleArn),
-            new iam.ArnPrincipal(this.contentRetrievalRole.roleArn),
-          ],
-          actions: ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
-          resources: [`${props.contentBucket.bucketArn}/*`],
-          conditions: {
-            StringEquals: {
-              "aws:RequestedRegion": cdk.Stack.of(this).region,
-            },
-          },
-        }),
+        // Note: Lambda access is granted through IAM roles, not resource-based policies
+        // to avoid circular dependencies between stacks
       ],
     });
 
     // Apply the bucket policy
-    props.contentBucket.addToResourcePolicy(bucketPolicy.statements[0]);
-    props.contentBucket.addToResourcePolicy(bucketPolicy.statements[1]);
-    props.contentBucket.addToResourcePolicy(bucketPolicy.statements[2]);
+    bucketPolicy.toJSON().Statement.forEach((statement: any) => {
+      props.contentBucket.addToResourcePolicy(
+        iam.PolicyStatement.fromJson(statement)
+      );
+    });
   }
 
   /**
@@ -902,7 +900,7 @@ export class SecurityConstruct extends Construct {
     // The actual role assignment should be done during function creation
 
     // Enable X-Ray tracing
-    lambdaFunction.addEnvironment("_X_AMZN_TRACE_ID", "");
+    // Note: _X_AMZN_TRACE_ID is automatically managed by the Lambda runtime
     lambdaFunction.addEnvironment(
       "AWS_XRAY_TRACING_NAME",
       `manga-${functionType}`

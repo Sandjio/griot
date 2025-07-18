@@ -17,6 +17,7 @@ export interface ApiStackProps extends cdk.StackProps {
   mangaTable: dynamodb.Table;
   contentBucket: s3.Bucket;
   eventBus: events.EventBus;
+  securityConstruct: SecurityConstruct;
   vpc?: ec2.Vpc;
 }
 
@@ -31,18 +32,12 @@ export class ApiStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: ApiStackProps) {
     super(scope, id, props);
 
-    // Initialize Security Construct
-    this.securityConstruct = new SecurityConstruct(this, "SecurityConstruct", {
-      environment: props.environment,
-      mangaTable: props.mangaTable,
-      contentBucket: props.contentBucket,
-      eventBus: props.eventBus,
-      vpc: props.vpc,
-    });
+    // Use Security Construct from props
+    this.securityConstruct = props.securityConstruct;
 
     // Cognito User Pool with comprehensive security policies
-    this.userPool = new cognito.UserPool(this, "MangaUserPool", {
-      userPoolName: `manga-platform-users-${props.environment}`,
+    this.userPool = new cognito.UserPool(this, "GriotMangaUserPool", {
+      userPoolName: `griot-manga-platform-users-${props.environment}`,
       selfSignUpEnabled: true,
       signInAliases: {
         email: true,
@@ -71,19 +66,19 @@ export class ApiStack extends cdk.Stack {
       // Basic security features (advanced security requires Plus plan)
       // User verification
       userVerification: {
-        emailSubject: "Manga Platform - Verify your email",
+        emailSubject: "Griot Manga Platform - Verify your email",
         emailBody:
-          "Thank you for signing up to Manga Platform! Your verification code is {####}",
+          "Thank you for signing up to Griot Manga Platform! Your verification code is {####}",
         emailStyle: cognito.VerificationEmailStyle.CODE,
-        smsMessage: "Your Manga Platform verification code is {####}",
+        // smsMessage: "Your Manga Platform verification code is {####}", // For now we skip SMS verification
       },
       // User invitation
       userInvitation: {
-        emailSubject: "Welcome to Manga Platform",
+        emailSubject: "Welcome to Griot Manga Platform",
         emailBody:
           "Hello {username}, you have been invited to join Manga Platform. Your temporary password is {####}",
-        smsMessage:
-          "Hello {username}, your temporary Manga Platform password is {####}",
+        // smsMessage:
+        //   "Hello {username}, your temporary Manga Platform password is {####}", // For now we skip SMS invitation
       },
       // Email configuration
       email: cognito.UserPoolEmail.withCognito(),
@@ -94,11 +89,17 @@ export class ApiStack extends cdk.Stack {
           ? cdk.RemovalPolicy.RETAIN
           : cdk.RemovalPolicy.DESTROY,
     });
+    // Managed UI domain for Cognito User Pool
+    this.userPool.addDomain("GriotMangaDomain", {
+      cognitoDomain: {
+        domainPrefix: `griot-manga-${props.environment}`,
+      },
+    });
 
     // Post Authentication Trigger Lambda with user profile creation
     this.postAuthTrigger = new lambda.Function(this, "PostAuthTrigger", {
       functionName: `manga-post-auth-${props.environment}`,
-      runtime: lambda.Runtime.NODEJS_18_X,
+      runtime: lambda.Runtime.NODEJS_20_X,
       handler: "index.handler",
       code: lambda.Code.fromAsset("../src/lambdas/post-auth-trigger"),
       role: this.securityConstruct.postAuthTriggerRole,
@@ -136,7 +137,7 @@ export class ApiStack extends cdk.Stack {
     // User Pool Client with enhanced JWT token validation
     this.userPoolClient = new cognito.UserPoolClient(
       this,
-      "MangaUserPoolClient",
+      "GriotMangaUserPoolClient",
       {
         userPool: this.userPool,
         userPoolClientName: `manga-platform-client-${props.environment}`,
@@ -169,12 +170,12 @@ export class ApiStack extends cdk.Stack {
           callbackUrls: [
             // Add callback URLs based on environment
             props.environment === "prod"
-              ? "https://manga-platform.com/callback"
+              ? "https://griot.emmasandjio.com/callback"
               : "http://localhost:3000/callback",
           ],
           logoutUrls: [
             props.environment === "prod"
-              ? "https://manga-platform.com/logout"
+              ? "https://griot.emmasandjio.com/logout"
               : "http://localhost:3000/logout",
           ],
         },
@@ -192,14 +193,14 @@ export class ApiStack extends cdk.Stack {
     );
 
     // API Gateway with enhanced configuration
-    this.api = new apigateway.RestApi(this, "MangaApi", {
-      restApiName: `manga-platform-api-${props.environment}`,
-      description: "Manga Generation Platform API",
+    this.api = new apigateway.RestApi(this, "GriotMangaApi", {
+      restApiName: `griot-manga-platform-api-${props.environment}`,
+      description: "Griot Manga Generation Platform API",
       // CORS configuration for frontend integration
       defaultCorsPreflightOptions: {
         allowOrigins:
           props.environment === "prod"
-            ? ["https://manga-platform.com"]
+            ? ["https://griot.emmasandjio.com"]
             : apigateway.Cors.ALL_ORIGINS,
         allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allowHeaders: [
@@ -419,7 +420,7 @@ export class ApiStack extends cdk.Stack {
     // Preferences Processing Lambda function with security configuration
     const preferencesLambda = new lambda.Function(this, "PreferencesLambda", {
       functionName: `manga-preferences-${props.environment}`,
-      runtime: lambda.Runtime.NODEJS_18_X,
+      runtime: lambda.Runtime.NODEJS_20_X,
       handler: "index.handler",
       code: lambda.Code.fromAsset("../src/lambdas/preferences-processing"),
       role: this.securityConstruct.preferencesProcessingRole,
@@ -429,7 +430,8 @@ export class ApiStack extends cdk.Stack {
         EVENT_BUS_NAME: props.eventBus.eventBusName,
         ENVIRONMENT: props.environment,
         QLOO_API_KEY: process.env.QLOO_API_KEY || "placeholder-key",
-        QLOO_API_URL: process.env.QLOO_API_URL || "https://api.qloo.com",
+        QLOO_API_URL:
+          process.env.QLOO_API_URL || "https://hackathon.api.qloo.com",
         // Security-related environment variables
         ENABLE_SECURITY_LOGGING: "true",
         SECURITY_CONTEXT: "preferences",
@@ -452,7 +454,7 @@ export class ApiStack extends cdk.Stack {
     // Status Check Lambda function with security configuration
     const statusCheckLambda = new lambda.Function(this, "StatusCheckLambda", {
       functionName: `manga-status-check-${props.environment}`,
-      runtime: lambda.Runtime.NODEJS_18_X,
+      runtime: lambda.Runtime.NODEJS_20_X,
       handler: "index.handler",
       code: lambda.Code.fromAsset("../src/lambdas/status-check"),
       role: this.securityConstruct.statusCheckRole,
@@ -574,7 +576,7 @@ export class ApiStack extends cdk.Stack {
       "ContentRetrievalLambda",
       {
         functionName: `manga-content-retrieval-${props.environment}`,
-        runtime: lambda.Runtime.NODEJS_18_X,
+        runtime: lambda.Runtime.NODEJS_20_X,
         handler: "index.handler",
         code: lambda.Code.fromAsset("../src/lambdas/content-retrieval"),
         role: this.securityConstruct.contentRetrievalRole,

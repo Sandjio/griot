@@ -17,14 +17,14 @@ export interface MonitoringStackProps extends cdk.StackProps {
   contentBucket: s3.Bucket;
   api: apigateway.RestApi;
   eventBus: events.EventBus;
-  lambdaFunctions: {
-    postAuthTrigger: lambda.Function;
-    preferencesProcessing: lambda.Function;
-    storyGeneration: lambda.Function;
-    episodeGeneration: lambda.Function;
-    imageGeneration: lambda.Function;
-    contentRetrieval: lambda.Function;
-    statusCheck: lambda.Function;
+  lambdaFunctions?: {
+    postAuthTrigger?: lambda.Function;
+    preferencesProcessing?: lambda.Function;
+    storyGeneration?: lambda.Function;
+    episodeGeneration?: lambda.Function;
+    imageGeneration?: lambda.Function;
+    contentRetrieval?: lambda.Function;
+    statusCheck?: lambda.Function;
   };
   alertEmail?: string;
 }
@@ -62,6 +62,7 @@ export class MonitoringStack extends cdk.Stack {
         host: "*",
         httpMethod: "*",
         urlPath: "*",
+        resourceArn: "*",
         version: 1,
       },
     });
@@ -328,7 +329,13 @@ export class MonitoringStack extends cdk.Stack {
   }
 
   private createLambdaMetricsWidgets(props: MonitoringStackProps): void {
-    const lambdaFunctions = Object.entries(props.lambdaFunctions);
+    if (!props.lambdaFunctions) {
+      // Avoid errors if lambdaFunctions is undefined
+      return;
+    }
+    const lambdaFunctions = Object.entries(props.lambdaFunctions).filter(
+      ([name, func]) => func !== undefined
+    );
 
     // Create widgets for Lambda metrics
     const lambdaInvocationsWidget = new cloudwatch.GraphWidget({
@@ -592,57 +599,66 @@ export class MonitoringStack extends cdk.Stack {
   }
 
   private createLambdaAlarms(props: MonitoringStackProps): void {
-    Object.entries(props.lambdaFunctions).forEach(([name, func]) => {
-      // Lambda Error Rate Alarm
-      const errorAlarm = new cloudwatch.Alarm(this, `${name}ErrorAlarm`, {
-        alarmName: `manga-lambda-${name}-errors-${props.environment}`,
-        alarmDescription: `High error rate in ${name} Lambda function`,
-        metric: new cloudwatch.MathExpression({
-          expression: "errors / invocations * 100",
-          usingMetrics: {
-            errors: new cloudwatch.Metric({
-              namespace: "AWS/Lambda",
-              metricName: "Errors",
-              dimensionsMap: { FunctionName: func.functionName },
-              statistic: "Sum",
-            }),
-            invocations: new cloudwatch.Metric({
-              namespace: "AWS/Lambda",
-              metricName: "Invocations",
-              dimensionsMap: { FunctionName: func.functionName },
-              statistic: "Sum",
-            }),
-          },
-        }),
-        threshold: 10, // 10% error rate
-        evaluationPeriods: 2,
-        comparisonOperator:
-          cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
-        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
-      });
+    if (!props.lambdaFunctions) {
+      return;
+    }
+    Object.entries(props.lambdaFunctions)
+      .filter(([name, func]) => func !== undefined)
+      .forEach(([name, func]) => {
+        // Lambda Error Rate Alarm
+        const errorAlarm = new cloudwatch.Alarm(this, `${name}ErrorAlarm`, {
+          alarmName: `manga-lambda-${name}-errors-${props.environment}`,
+          alarmDescription: `High error rate in ${name} Lambda function`,
+          metric: new cloudwatch.MathExpression({
+            expression: "errors / invocations * 100",
+            usingMetrics: {
+              errors: new cloudwatch.Metric({
+                namespace: "AWS/Lambda",
+                metricName: "Errors",
+                dimensionsMap: { FunctionName: func.functionName },
+                statistic: "Sum",
+              }),
+              invocations: new cloudwatch.Metric({
+                namespace: "AWS/Lambda",
+                metricName: "Invocations",
+                dimensionsMap: { FunctionName: func.functionName },
+                statistic: "Sum",
+              }),
+            },
+          }),
+          threshold: 10, // 10% error rate
+          evaluationPeriods: 2,
+          comparisonOperator:
+            cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+          treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+        });
 
-      // Lambda Duration Alarm
-      const durationAlarm = new cloudwatch.Alarm(this, `${name}DurationAlarm`, {
-        alarmName: `manga-lambda-${name}-duration-${props.environment}`,
-        alarmDescription: `High duration in ${name} Lambda function`,
-        metric: new cloudwatch.Metric({
-          namespace: "AWS/Lambda",
-          metricName: "Duration",
-          dimensionsMap: { FunctionName: func.functionName },
-          statistic: "Average",
-        }),
-        threshold: 30000, // 30 seconds
-        evaluationPeriods: 3,
-        comparisonOperator:
-          cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
-      });
+        // Lambda Duration Alarm
+        const durationAlarm = new cloudwatch.Alarm(
+          this,
+          `${name}DurationAlarm`,
+          {
+            alarmName: `manga-lambda-${name}-duration-${props.environment}`,
+            alarmDescription: `High duration in ${name} Lambda function`,
+            metric: new cloudwatch.Metric({
+              namespace: "AWS/Lambda",
+              metricName: "Duration",
+              dimensionsMap: { FunctionName: func.functionName },
+              statistic: "Average",
+            }),
+            threshold: 30000, // 30 seconds
+            evaluationPeriods: 3,
+            comparisonOperator:
+              cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+          }
+        );
 
-      [errorAlarm, durationAlarm].forEach((alarm) => {
-        alarm.addAlarmAction({
-          bind: () => ({ alarmActionArn: this.alertTopic.topicArn }),
+        [errorAlarm, durationAlarm].forEach((alarm) => {
+          alarm.addAlarmAction({
+            bind: () => ({ alarmActionArn: this.alertTopic.topicArn }),
+          });
         });
       });
-    });
   }
 
   private createLogGroups(props: MonitoringStackProps): void {
@@ -657,16 +673,20 @@ export class MonitoringStack extends cdk.Stack {
     });
 
     // Lambda Log Groups with structured logging
-    Object.entries(props.lambdaFunctions).forEach(([name, func]) => {
-      new logs.LogGroup(this, `${name}LogGroup`, {
-        logGroupName: `/aws/lambda/${func.functionName}`,
-        retention:
-          props.environment === "prod"
-            ? logs.RetentionDays.ONE_MONTH
-            : logs.RetentionDays.ONE_WEEK,
-        removalPolicy: cdk.RemovalPolicy.DESTROY,
-      });
-    });
+    if (props.lambdaFunctions) {
+      Object.entries(props.lambdaFunctions)
+        .filter(([name, func]) => func !== undefined)
+        .forEach(([name, func]) => {
+          new logs.LogGroup(this, `${name}LogGroup`, {
+            logGroupName: `/aws/lambda/${func.functionName}`,
+            retention:
+              props.environment === "prod"
+                ? logs.RetentionDays.ONE_MONTH
+                : logs.RetentionDays.ONE_WEEK,
+            removalPolicy: cdk.RemovalPolicy.DESTROY,
+          });
+        });
+    }
 
     // EventBridge Log Group
     new logs.LogGroup(this, "EventBridgeLogGroup", {

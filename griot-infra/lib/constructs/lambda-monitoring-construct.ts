@@ -130,10 +130,8 @@ export class LambdaMonitoringConstruct extends Construct {
     );
 
     // Configure X-Ray tracing
-    if (this.xrayPolicy) {
-      lambdaFunction.addEnvironment("_X_AMZN_TRACE_ID", "");
-      // Note: X-Ray tracing mode is set at the function level in CDK
-    }
+    // Note: X-Ray tracing mode is set at the function level in CDK
+    // The _X_AMZN_TRACE_ID environment variable is automatically managed by the Lambda runtime
   }
 
   /**

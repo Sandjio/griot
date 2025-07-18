@@ -5,6 +5,7 @@ import * as events from "aws-cdk-lib/aws-events";
 import * as iam from "aws-cdk-lib/aws-iam";
 import { Construct } from "constructs";
 import { EventBridgeConstruct } from "../constructs/eventbridge-construct";
+import { SecurityConstruct } from "../constructs/security-construct";
 
 export interface CoreInfrastructureStackProps extends cdk.StackProps {
   environment: string;
@@ -15,6 +16,7 @@ export class CoreInfrastructureStack extends cdk.Stack {
   public readonly contentBucket: s3.Bucket;
   public readonly eventBus: events.EventBus;
   public readonly eventBridgeConstruct: EventBridgeConstruct;
+  public readonly securityConstruct: SecurityConstruct;
   public readonly s3AccessPolicy: iam.PolicyStatement;
 
   constructor(
@@ -51,10 +53,12 @@ export class CoreInfrastructureStack extends cdk.Stack {
           : cdk.RemovalPolicy.DESTROY,
       stream: dynamodb.StreamViewType.NEW_AND_OLD_IMAGES,
       // Additional security configurations
-      contributorInsightsSpecification: {
-        enabled: props.environment === "prod",
-      },
     });
+
+    // Contributor Insights cannot be enabled via CDK directly; consider enabling it manually in the AWS Console if needed.
+    // if (props.environment === "prod") {
+    //   this.mangaTable.enableContributorInsights();
+    // }
 
     // Global Secondary Index 1 - Alternative access patterns
     this.mangaTable.addGlobalSecondaryIndex({
@@ -174,6 +178,14 @@ export class CoreInfrastructureStack extends cdk.Stack {
         environment: props.environment,
       }
     );
+
+    // Security Construct with IAM roles and policies
+    this.securityConstruct = new SecurityConstruct(this, "SecurityConstruct", {
+      environment: props.environment,
+      mangaTable: this.mangaTable,
+      contentBucket: this.contentBucket,
+      eventBus: this.eventBus,
+    });
 
     // S3 Access Policy for Lambda functions
     this.s3AccessPolicy = new iam.PolicyStatement({

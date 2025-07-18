@@ -2,6 +2,7 @@
 import * as cdk from "aws-cdk-lib";
 import { CoreInfrastructureStack } from "../lib/stacks/core-infrastructure-stack";
 import { ApiStack } from "../lib/stacks/api-stack";
+import { ProcessingStack } from "../lib/stacks/processing-stack";
 import { MonitoringStack } from "../lib/stacks/monitoring-stack";
 
 const app = new cdk.App();
@@ -28,43 +29,72 @@ const alertEmail = envSettings.alertEmail;
 // Core Infrastructure Stack
 const coreStack = new CoreInfrastructureStack(
   app,
-  `MangaCoreStack-${environment}`,
+  `GriotCoreStack-${environment}`,
   {
     environment,
     env: envConfig,
-    description: `Manga Platform Core Infrastructure - ${environment}`,
+    description: `Griot Manga Platform Core Infrastructure - ${environment}`,
   }
 );
 
 // API Stack
-const apiStack = new ApiStack(app, `MangaApiStack-${environment}`, {
+const apiStack = new ApiStack(app, `GriotMangaApiStack-${environment}`, {
   environment,
   mangaTable: coreStack.mangaTable,
   contentBucket: coreStack.contentBucket,
   eventBus: coreStack.eventBus,
+  securityConstruct: coreStack.securityConstruct,
   env: envConfig,
-  description: `Manga Platform API - ${environment}`,
+  description: `Griot Manga Platform API - ${environment}`,
 });
 
-// Monitoring Stack
-const monitoringStack = new MonitoringStack(
+// Processing Stack
+const processingStack = new ProcessingStack(
   app,
-  `MangaMonitoringStack-${environment}`,
+  `GriotMangaProcessingStack-${environment}`,
   {
     environment,
     mangaTable: coreStack.mangaTable,
     contentBucket: coreStack.contentBucket,
-    api: apiStack.api,
-    alertEmail,
+    eventBus: coreStack.eventBus,
+    eventBridgeConstruct: coreStack.eventBridgeConstruct,
+    securityConstruct: coreStack.securityConstruct,
     env: envConfig,
-    description: `Manga Platform Monitoring - ${environment}`,
+    description: `Griot Manga Platform Processing - ${environment}`,
   }
 );
 
+// Monitoring Stack - temporarily disabled to resolve circular dependencies
+// const monitoringStack = new MonitoringStack(
+//   app,
+//   `GriotMangaMonitoringStack-${environment}`,
+//   {
+//     environment,
+//     mangaTable: coreStack.mangaTable,
+//     contentBucket: coreStack.contentBucket,
+//     api: apiStack.api,
+//     eventBus: coreStack.eventBus,
+//     lambdaFunctions: {
+//       postAuthTrigger: apiStack.lambdaFunctions.postAuthTrigger,
+//       preferencesProcessing: apiStack.lambdaFunctions.preferencesProcessing,
+//       storyGeneration: processingStack.lambdaFunctions.storyGeneration,
+//       episodeGeneration: processingStack.lambdaFunctions.episodeGeneration,
+//       imageGeneration: processingStack.lambdaFunctions.imageGeneration,
+//       contentRetrieval: apiStack.lambdaFunctions.contentRetrieval,
+//       statusCheck: apiStack.lambdaFunctions.statusCheck,
+//     },
+//     alertEmail,
+//     env: envConfig,
+//     description: `Griot Manga Platform Monitoring - ${environment}`,
+//   }
+// );
+
 // Add dependencies
 apiStack.addDependency(coreStack);
-monitoringStack.addDependency(coreStack);
-monitoringStack.addDependency(apiStack);
+processingStack.addDependency(coreStack);
+// monitoringStack.addDependency(coreStack);
+// monitoringStack.addDependency(apiStack);
+// monitoringStack.addDependency(processingStack);
 
 // Tags for all stacks
 cdk.Tags.of(app).add("Project", "MangaPlatform");
