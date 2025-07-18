@@ -666,6 +666,10 @@ export class MonitoringStack extends cdk.Stack {
   }
 
   private createLogGroups(props: MonitoringStackProps): void {
+    // Note: Log groups are now created automatically by AWS services
+    // to avoid conflicts with existing log groups in other stacks.
+    // If you need explicit log group management, uncomment the following:
+    /*
     // API Gateway Log Group
     new logs.LogGroup(this, "ApiLogGroup", {
       logGroupName: `/aws/apigateway/manga-platform-${props.environment}`,
@@ -711,5 +715,6 @@ export class MonitoringStack extends cdk.Stack {
           : logs.RetentionDays.ONE_WEEK,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
+    */
   }
 }

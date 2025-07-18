@@ -24,14 +24,17 @@ export interface LambdaMonitoringProps {
 }
 
 export class LambdaMonitoringConstruct extends Construct {
-  public readonly logGroup: logs.LogGroup;
+  public readonly logGroup?: logs.LogGroup;
   public readonly xrayPolicy?: iam.PolicyStatement;
   public readonly cloudWatchMetricsPolicy: iam.PolicyStatement;
 
   constructor(scope: Construct, id: string, props: LambdaMonitoringProps) {
     super(scope, id);
 
-    // Create CloudWatch Log Group with structured logging
+    // Note: We don't create log groups explicitly to avoid conflicts
+    // Lambda will create them automatically when the function runs
+    // If you need explicit log group management, uncomment the following:
+    /*
     this.logGroup = new logs.LogGroup(this, "LogGroup", {
       logGroupName: `/aws/lambda/${props.functionName}`,
       retention:
@@ -41,6 +44,7 @@ export class LambdaMonitoringConstruct extends Construct {
           : logs.RetentionDays.ONE_WEEK),
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
+    */
 
     // CloudWatch Metrics Policy
     this.cloudWatchMetricsPolicy = new iam.PolicyStatement({
@@ -81,9 +85,11 @@ export class LambdaMonitoringConstruct extends Construct {
 
     // CloudWatch Insights (if enabled)
     if (props.enableInsights) {
+      const logGroupName = `/aws/lambda/${props.functionName}`;
+
       new logs.CfnQueryDefinition(this, "InsightsQuery", {
         name: `${props.functionName}-errors`,
-        logGroupNames: [this.logGroup.logGroupName],
+        logGroupNames: [logGroupName],
         queryString: `
           fields @timestamp, @message, correlationId, operationName, error.message
           | filter @message like /Error occurred/
@@ -94,7 +100,7 @@ export class LambdaMonitoringConstruct extends Construct {
 
       new logs.CfnQueryDefinition(this, "PerformanceQuery", {
         name: `${props.functionName}-performance`,
-        logGroupNames: [this.logGroup.logGroupName],
+        logGroupNames: [logGroupName],
         queryString: `
           fields @timestamp, @message, correlationId, operationName, context.duration
           | filter @message like /completed/
