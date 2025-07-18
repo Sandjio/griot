@@ -103,7 +103,9 @@ export class QlooApiClient {
         );
 
         ErrorLogger.logError(
-          standardError,
+          standardError instanceof Error
+            ? standardError
+            : new Error(String(standardError)),
           { preferences },
           "QlooApiClient.fetchInsights"
         );

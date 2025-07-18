@@ -69,7 +69,7 @@ const preferencesProcessingHandler = async (
       httpMethod: event.httpMethod,
       path: event.path,
       correlationId,
-      traceId: segment?.trace_id,
+      // traceId: segment?.trace_id,
     },
     "PreferencesProcessing"
   );
