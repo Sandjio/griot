@@ -11,9 +11,13 @@ import * as ec2 from "aws-cdk-lib/aws-ec2";
 import { Construct } from "constructs";
 import { SecurityConstruct } from "../constructs/security-construct";
 import { LambdaMonitoringConstruct } from "../constructs/lambda-monitoring-construct";
+import { EnvironmentConfig } from "../config/environment-config";
 
 export interface ApiStackProps extends cdk.StackProps {
   environment: string;
+  envConfig: EnvironmentConfig;
+  deploymentColor?: string;
+  deploymentId?: string;
   mangaTable: dynamodb.Table;
   contentBucket: s3.Bucket;
   eventBus: events.EventBus;
@@ -480,11 +484,48 @@ export class ApiStack extends cdk.Stack {
         : {}),
     });
 
+    // Health Check Lambda function
+    const healthCheckLambda = new lambda.Function(this, "HealthCheckLambda", {
+      functionName: `manga-health-check-${props.environment}${
+        props.deploymentColor ? `-${props.deploymentColor}` : ""
+      }`,
+      runtime: lambda.Runtime.NODEJS_18_X,
+      handler: "index.handler",
+      code: lambda.Code.fromAsset("../src/lambdas/health-check"),
+      timeout: cdk.Duration.seconds(30),
+      memorySize: props.envConfig.lambdaSettings.memorySize,
+      environment: {
+        ENVIRONMENT: props.environment,
+        DEPLOYMENT_COLOR: props.deploymentColor || "",
+        DEPLOYMENT_VERSION: props.deploymentId || "1.0.0",
+        LOG_LEVEL: props.environment === "prod" ? "INFO" : "DEBUG",
+      },
+      logRetention: props.envConfig.logRetentionDays as logs.RetentionDays,
+      tracing: props.envConfig.enableXRayTracing
+        ? lambda.Tracing.ACTIVE
+        : lambda.Tracing.DISABLED,
+    });
+
     // Store Lambda function references
     this.lambdaFunctions.preferencesProcessing = preferencesLambda;
     this.lambdaFunctions.statusCheck = statusCheckLambda;
+    this.lambdaFunctions.healthCheck = healthCheckLambda;
 
     // API Resources and Methods with request validation
+
+    // Health endpoint (no authentication required)
+    const healthResource = this.api.root.addResource("health");
+    healthResource.addMethod(
+      "GET",
+      new apigateway.LambdaIntegration(healthCheckLambda, {
+        proxy: true,
+      }),
+      {
+        // No authorization required for health checks
+        authorizationType: apigateway.AuthorizationType.NONE,
+      }
+    );
+
     const preferencesResource = this.api.root.addResource("preferences");
     preferencesResource.addMethod(
       "POST",
@@ -778,6 +819,16 @@ export class ApiStack extends cdk.Stack {
     new cdk.CfnOutput(this, "ApiUrl", {
       value: this.api.url,
       exportName: `api-url-${props.environment}`,
+    });
+
+    new cdk.CfnOutput(this, "ApiEndpoint", {
+      value: this.api.url,
+      exportName: `api-endpoint-${props.environment}`,
+    });
+
+    new cdk.CfnOutput(this, "ApiName", {
+      value: this.api.restApiName,
+      exportName: `api-name-${props.environment}`,
     });
   }
 }

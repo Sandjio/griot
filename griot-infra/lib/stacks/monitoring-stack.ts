@@ -10,9 +10,13 @@ import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as events from "aws-cdk-lib/aws-events";
 import * as xray from "aws-cdk-lib/aws-xray";
 import { Construct } from "constructs";
+import { EnvironmentConfig } from "../config/environment-config";
 
 export interface MonitoringStackProps extends cdk.StackProps {
   environment: string;
+  envConfig: EnvironmentConfig;
+  deploymentColor?: string;
+  deploymentId?: string;
   mangaTable: dynamodb.Table;
   contentBucket: s3.Bucket;
   api: apigateway.RestApi;

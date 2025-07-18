@@ -1,0 +1,354 @@
+name: Deploy Manga Platform
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - "release/*"
+  pull_request:
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to deploy to"
+        required: true
+        default: "dev"
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      deployment_type:
+        description: "Deployment type"
+        required: true
+        default: "blue-green"
+        type: choice
+        options:
+          - blue-green
+          - direct
+      force_color:
+        description: "Force deployment color (optional)"
+        required: false
+        type: choice
+        options:
+          - ""
+          - blue
+          - green
+
+env:
+  NODE_VERSION: "18"
+  AWS_REGION: "us-east-1"
+
+jobs:
+  # Test and validation job
+  test:
+    name: Test and Validate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          cd griot-infra && npm ci
+
+      - name: Run unit tests
+        run: ./griot-infra/scripts/run-tests.sh unit
+
+      - name: Run code quality checks
+        run: ./griot-infra/scripts/run-tests.sh quality
+
+      - name: Run infrastructure tests
+        run: ./griot-infra/scripts/run-tests.sh infrastructure
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: |
+            test-results/
+            coverage/
+            griot-infra/test-results/
+
+      - name: Publish test results
+        uses: dorny/test-reporter@v1
+        if: always()
+        with:
+          name: Test Results
+          path: "test-results/*.xml,griot-infra/test-results/*.xml"
+          reporter: jest-junit
+
+  # Determine deployment environment
+  determine-environment:
+    name: Determine Environment
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.env.outputs.environment }}
+      should_deploy: ${{ steps.env.outputs.should_deploy }}
+
+    steps:
+      - name: Determine environment and deployment
+        id: env
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "environment=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
+            echo "should_deploy=true" >> $GITHUB_OUTPUT
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "environment=prod" >> $GITHUB_OUTPUT
+            echo "should_deploy=true" >> $GITHUB_OUTPUT
+          elif [ "${{ github.ref }}" = "refs/heads/develop" ]; then
+            echo "environment=staging" >> $GITHUB_OUTPUT
+            echo "should_deploy=true" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" == refs/heads/release/* ]]; then
+            echo "environment=staging" >> $GITHUB_OUTPUT
+            echo "should_deploy=true" >> $GITHUB_OUTPUT
+          else
+            echo "environment=dev" >> $GITHUB_OUTPUT
+            echo "should_deploy=false" >> $GITHUB_OUTPUT
+          fi
+
+  # Development deployment
+  deploy-dev:
+    name: Deploy to Development
+    runs-on: ubuntu-latest
+    needs: [test, determine-environment]
+    if: needs.determine-environment.outputs.environment == 'dev' && needs.determine-environment.outputs.should_deploy == 'true'
+    environment: development
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          cd griot-infra && npm ci
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_DEV }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_DEV }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy to development
+        run: |
+          cd griot-infra
+          ./scripts/deploy-pipeline.sh dev direct
+
+      - name: Run deployment validation
+        run: |
+          cd griot-infra
+          ./scripts/deployment-validation.sh dev
+
+      - name: Run integration tests
+        run: ./griot-infra/scripts/run-tests.sh integration dev
+
+  # Staging deployment
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [test, determine-environment]
+    if: needs.determine-environment.outputs.environment == 'staging' && needs.determine-environment.outputs.should_deploy == 'true'
+    environment: staging
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          cd griot-infra && npm ci
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_STAGING }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_STAGING }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy to staging
+        run: |
+          cd griot-infra
+          ./scripts/deploy-pipeline.sh staging blue-green
+
+      - name: Run deployment validation
+        run: |
+          cd griot-infra
+          ./scripts/deployment-validation.sh staging
+
+      - name: Run integration tests
+        run: ./griot-infra/scripts/run-tests.sh integration staging
+
+      - name: Run load tests
+        run: ./griot-infra/scripts/run-tests.sh load staging
+
+  # Production deployment
+  deploy-prod:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [test, determine-environment]
+    if: needs.determine-environment.outputs.environment == 'prod' && needs.determine-environment.outputs.should_deploy == 'true'
+    environment: production
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          cd griot-infra && npm ci
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_PROD }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_PROD }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Pre-deployment validation
+        run: |
+          cd griot-infra
+          # Run additional pre-production checks
+          ./scripts/run-tests.sh all
+
+      - name: Deploy to production
+        run: |
+          cd griot-infra
+          deployment_type="${{ github.event.inputs.deployment_type || 'blue-green' }}"
+          force_color="${{ github.event.inputs.force_color }}"
+
+          if [ -n "$force_color" ]; then
+            ./scripts/deploy-pipeline.sh prod "$deployment_type" "$force_color"
+          else
+            ./scripts/deploy-pipeline.sh prod "$deployment_type"
+          fi
+
+      - name: Run deployment validation
+        run: |
+          cd griot-infra
+          ./scripts/deployment-validation.sh prod
+
+      - name: Run smoke tests
+        run: ./griot-infra/scripts/run-tests.sh integration prod
+
+      - name: Notify deployment success
+        if: success()
+        run: |
+          echo "Production deployment completed successfully!"
+          # Add notification logic here (Slack, email, etc.)
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          echo "Production deployment failed, initiating rollback..."
+          cd griot-infra
+          # Rollback logic would be implemented here
+          echo "Manual intervention may be required"
+
+  # Manual workflow dispatch deployment
+  deploy-manual:
+    name: Manual Deployment
+    runs-on: ubuntu-latest
+    needs: [test]
+    if: github.event_name == 'workflow_dispatch'
+    environment: ${{ github.event.inputs.environment }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          cd griot-infra && npm ci
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets[format('AWS_ACCESS_KEY_ID_{0}', upper(github.event.inputs.environment))] }}
+          aws-secret-access-key: ${{ secrets[format('AWS_SECRET_ACCESS_KEY_{0}', upper(github.event.inputs.environment))] }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy
+        run: |
+          cd griot-infra
+          environment="${{ github.event.inputs.environment }}"
+          deployment_type="${{ github.event.inputs.deployment_type }}"
+          force_color="${{ github.event.inputs.force_color }}"
+
+          if [ -n "$force_color" ]; then
+            ./scripts/deploy-pipeline.sh "$environment" "$deployment_type" "$force_color"
+          else
+            ./scripts/deploy-pipeline.sh "$environment" "$deployment_type"
+          fi
+
+      - name: Run deployment validation
+        run: |
+          cd griot-infra
+          ./scripts/deployment-validation.sh "${{ github.event.inputs.environment }}"
+
+      - name: Run post-deployment tests
+        run: |
+          environment="${{ github.event.inputs.environment }}"
+          if [ "$environment" != "prod" ]; then
+            ./griot-infra/scripts/run-tests.sh integration "$environment"
+          else
+            ./griot-infra/scripts/run-tests.sh integration "$environment"
+          fi
+
+  # Cleanup job
+  cleanup:
+    name: Cleanup
+    runs-on: ubuntu-latest
+    needs: [deploy-dev, deploy-staging, deploy-prod, deploy-manual]
+    if: always()
+
+    steps:
+      - name: Cleanup artifacts
+        run: |
+          echo "Cleaning up temporary artifacts..."
+          # Add cleanup logic here if needed
+
+      - name: Report deployment status
+        run: |
+          echo "Deployment pipeline completed"
+          echo "Check individual job results for details"

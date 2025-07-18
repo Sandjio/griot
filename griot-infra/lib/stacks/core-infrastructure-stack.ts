@@ -6,9 +6,13 @@ import * as iam from "aws-cdk-lib/aws-iam";
 import { Construct } from "constructs";
 import { EventBridgeConstruct } from "../constructs/eventbridge-construct";
 import { SecurityConstruct } from "../constructs/security-construct";
+import { EnvironmentConfig } from "../config/environment-config";
 
 export interface CoreInfrastructureStackProps extends cdk.StackProps {
   environment: string;
+  envConfig: EnvironmentConfig;
+  deploymentColor?: string;
+  deploymentId?: string;
 }
 
 export class CoreInfrastructureStack extends cdk.Stack {
@@ -26,9 +30,11 @@ export class CoreInfrastructureStack extends cdk.Stack {
   ) {
     super(scope, id, props);
 
-    // DynamoDB Single Table Design with enhanced encryption
-    this.mangaTable = new dynamodb.Table(this, "MangaPlatformTable", {
-      tableName: `manga-platform-table-${props.environment}`,
+    // DynamoDB Single Table Design with environment-specific configuration
+    let tableProps: dynamodb.TableProps = {
+      tableName: `manga-platform-table-${props.environment}${
+        props.deploymentColor ? `-${props.deploymentColor}` : ""
+      }`,
       partitionKey: {
         name: "PK",
         type: dynamodb.AttributeType.STRING,
@@ -37,23 +43,40 @@ export class CoreInfrastructureStack extends cdk.Stack {
         name: "SK",
         type: dynamodb.AttributeType.STRING,
       },
-      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      // Enhanced encryption configuration
+      billingMode:
+        props.envConfig.dynamoDbSettings.billingMode === "PROVISIONED"
+          ? dynamodb.BillingMode.PROVISIONED
+          : dynamodb.BillingMode.PAY_PER_REQUEST,
       encryption:
         props.environment === "prod"
           ? dynamodb.TableEncryption.CUSTOMER_MANAGED
           : dynamodb.TableEncryption.AWS_MANAGED,
       pointInTimeRecoverySpecification: {
-        pointInTimeRecoveryEnabled: true,
+        pointInTimeRecoveryEnabled:
+          props.envConfig.dynamoDbSettings.pointInTimeRecovery,
       },
-      deletionProtection: props.environment === "prod",
+      deletionProtection: props.envConfig.dynamoDbSettings.deletionProtection,
       removalPolicy:
         props.environment === "prod"
           ? cdk.RemovalPolicy.RETAIN
           : cdk.RemovalPolicy.DESTROY,
       stream: dynamodb.StreamViewType.NEW_AND_OLD_IMAGES,
-      // Additional security configurations
-    });
+    };
+
+    // Add provisioned capacity if using PROVISIONED billing mode
+    if (props.envConfig.dynamoDbSettings.billingMode === "PROVISIONED") {
+      tableProps = {
+        ...tableProps,
+        readCapacity: props.envConfig.dynamoDbSettings.readCapacity,
+        writeCapacity: props.envConfig.dynamoDbSettings.writeCapacity,
+      };
+    }
+
+    this.mangaTable = new dynamodb.Table(
+      this,
+      "MangaPlatformTable",
+      tableProps
+    );
 
     // Contributor Insights cannot be enabled via CDK directly; consider enabling it manually in the AWS Console if needed.
     // if (props.environment === "prod") {
@@ -86,17 +109,17 @@ export class CoreInfrastructureStack extends cdk.Stack {
       },
     });
 
-    // S3 Bucket for content storage with enhanced encryption and security
+    // S3 Bucket for content storage with environment-specific configuration
     this.contentBucket = new s3.Bucket(this, "ContentBucket", {
-      bucketName: `manga-platform-content-${props.environment}`,
-      // Enhanced encryption configuration
+      bucketName: `manga-platform-content-${props.environment}${
+        props.deploymentColor ? `-${props.deploymentColor}` : ""
+      }`,
       encryption:
         props.environment === "prod"
           ? s3.BucketEncryption.KMS_MANAGED
           : s3.BucketEncryption.S3_MANAGED,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
-      versioned: true,
-      // Enhanced security configurations
+      versioned: props.envConfig.s3Settings.versioning,
       enforceSSL: true,
       minimumTLSVersion: 1.2,
       cors: [
@@ -124,13 +147,20 @@ export class CoreInfrastructureStack extends cdk.Stack {
           transitions: [
             {
               storageClass: s3.StorageClass.INFREQUENT_ACCESS,
-              transitionAfter: cdk.Duration.days(30),
+              transitionAfter: cdk.Duration.days(
+                props.envConfig.s3Settings.lifecycleRules.transitionToIA
+              ),
             },
             {
               storageClass: s3.StorageClass.GLACIER,
-              transitionAfter: cdk.Duration.days(90),
+              transitionAfter: cdk.Duration.days(
+                props.envConfig.s3Settings.lifecycleRules.transitionToGlacier
+              ),
             },
           ],
+          expiration: cdk.Duration.days(
+            props.envConfig.s3Settings.lifecycleRules.expiration
+          ),
         },
         {
           id: "TransitionEpisodesToIA",
@@ -138,7 +168,9 @@ export class CoreInfrastructureStack extends cdk.Stack {
           transitions: [
             {
               storageClass: s3.StorageClass.INFREQUENT_ACCESS,
-              transitionAfter: cdk.Duration.days(30),
+              transitionAfter: cdk.Duration.days(
+                props.envConfig.s3Settings.lifecycleRules.transitionToIA
+              ),
             },
           ],
         },
@@ -148,7 +180,9 @@ export class CoreInfrastructureStack extends cdk.Stack {
           transitions: [
             {
               storageClass: s3.StorageClass.INFREQUENT_ACCESS,
-              transitionAfter: cdk.Duration.days(60),
+              transitionAfter: cdk.Duration.days(
+                props.envConfig.s3Settings.lifecycleRules.transitionToIA + 30
+              ),
             },
           ],
         },

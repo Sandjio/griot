@@ -8,9 +8,13 @@ import { Construct } from "constructs";
 import { SecurityConstruct } from "../constructs/security-construct";
 import { LambdaMonitoringConstruct } from "../constructs/lambda-monitoring-construct";
 import { EventBridgeConstruct } from "../constructs/eventbridge-construct";
+import { EnvironmentConfig } from "../config/environment-config";
 
 export interface ProcessingStackProps extends cdk.StackProps {
   environment: string;
+  envConfig: EnvironmentConfig;
+  deploymentColor?: string;
+  deploymentId?: string;
   mangaTable: dynamodb.Table;
   contentBucket: s3.Bucket;
   eventBus: events.EventBus;

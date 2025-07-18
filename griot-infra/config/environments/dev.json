@@ -1,0 +1,48 @@
+{
+    "environment": "dev",
+    "region": "us-east-1",
+    "account": "${CDK_DEFAULT_ACCOUNT}",
+    "alertEmail": "dev-alerts@example.com",
+    "domainName": "dev-api.manga-platform.com",
+    "certificateArn": "",
+    "enableXRayTracing": true,
+    "logRetentionDays": 7,
+    "backupRetentionDays": 7,
+    "enableDetailedMonitoring": true,
+    "lambdaSettings": {
+        "timeout": 300,
+        "memorySize": 512,
+        "reservedConcurrency": 10
+    },
+    "dynamoDbSettings": {
+        "billingMode": "PAY_PER_REQUEST",
+        "pointInTimeRecovery": false,
+        "deletionProtection": false
+    },
+    "s3Settings": {
+        "versioning": false,
+        "lifecycleRules": {
+            "transitionToIA": 30,
+            "transitionToGlacier": 90,
+            "expiration": 365
+        }
+    },
+    "apiGatewaySettings": {
+        "throttling": {
+            "rateLimit": 1000,
+            "burstLimit": 2000
+        },
+        "caching": {
+            "enabled": false,
+            "ttl": 300
+        }
+    },
+    "bedrockSettings": {
+        "models": {
+            "textGeneration": "anthropic.claude-3-sonnet-20240229-v1:0",
+            "imageGeneration": "stability.stable-diffusion-xl-v1"
+        },
+        "maxTokens": 4000,
+        "temperature": 0.7
+    }
+}
