@@ -12,6 +12,8 @@ import { Construct } from "constructs";
 import { SecurityConstruct } from "../constructs/security-construct";
 import { LambdaMonitoringConstruct } from "../constructs/lambda-monitoring-construct";
 import { EnvironmentConfig } from "../config/environment-config";
+import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
+import * as path from "path";
 
 export interface ApiStackProps extends cdk.StackProps {
   environment: string;
@@ -101,12 +103,23 @@ export class ApiStack extends cdk.Stack {
     });
 
     // Post Authentication Trigger Lambda with user profile creation
-    this.postAuthTrigger = new lambda.Function(this, "PostAuthTrigger", {
+    this.postAuthTrigger = new NodejsFunction(this, "PostAuthTrigger", {
       functionName: `manga-post-auth-${props.environment}`,
       runtime: lambda.Runtime.NODEJS_20_X,
-      handler: "index.handler",
-      code: lambda.Code.fromAsset("../src/lambdas/post-auth-trigger"),
+      handler: "handler",
+      entry: path.join(
+        __dirname,
+        "../../..",
+        "/src/lambdas/post-auth-trigger/index.ts"
+      ),
       role: this.securityConstruct.postAuthTriggerRole,
+      bundling: {
+        minify: true,
+        sourceMap: true,
+        target: "node20",
+        externalModules: ["aws-sdk"],
+      },
+      projectRoot: path.join(__dirname, "../../.."),
       environment: {
         MANGA_TABLE_NAME: props.mangaTable.tableName,
         ENVIRONMENT: props.environment,
@@ -422,20 +435,32 @@ export class ApiStack extends cdk.Stack {
     });
 
     // Preferences Processing Lambda function with security configuration
-    const preferencesLambda = new lambda.Function(this, "PreferencesLambda", {
+    const preferencesLambda = new NodejsFunction(this, "PreferencesLambda", {
       functionName: `manga-preferences-${props.environment}`,
       runtime: lambda.Runtime.NODEJS_20_X,
-      handler: "index.handler",
-      code: lambda.Code.fromAsset("../src/lambdas/preferences-processing"),
+      handler: "handler",
+      entry: path.join(
+        __dirname,
+        "../../..",
+        "/src/lambdas/preferences-processing/index.ts"
+      ),
       role: this.securityConstruct.preferencesProcessingRole,
+      bundling: {
+        minify: true,
+        sourceMap: true,
+        target: "node20",
+        externalModules: ["aws-sdk"],
+      },
+      projectRoot: path.join(__dirname, "../../.."),
       environment: {
         MANGA_TABLE_NAME: props.mangaTable.tableName,
         CONTENT_BUCKET_NAME: props.contentBucket.bucketName,
         EVENT_BUS_NAME: props.eventBus.eventBusName,
         ENVIRONMENT: props.environment,
-        QLOO_API_KEY: process.env.QLOO_API_KEY || "placeholder-key",
+        QLOO_API_KEY: process.env.QLOO_API_KEY!,
         QLOO_API_URL:
-          process.env.QLOO_API_URL || "https://hackathon.api.qloo.com",
+          process.env.QLOO_API_URL ||
+          "https://hackathon.api.qloo.com/v2/insights",
         // Security-related environment variables
         ENABLE_SECURITY_LOGGING: "true",
         SECURITY_CONTEXT: "preferences",

@@ -7,7 +7,7 @@ import {
   CorrelationContext,
 } from "../../utils/error-handler";
 import { ErrorUtils } from "../../types/error-types";
-
+import { resolveGenreTags } from "../../utils/tag.mapper";
 /**
  * Qloo API Client
  *
@@ -18,17 +18,9 @@ import { ErrorUtils } from "../../types/error-types";
  */
 
 interface QlooApiResponse {
-  recommendations: Array<{
-    category: string;
-    score: number;
-    attributes: Record<string, any>;
-  }>;
-  trends: Array<{
-    topic: string;
-    popularity: number;
-  }>;
-  status: "success" | "error";
-  message?: string;
+  // Qloo API returns an array of entities or a different structure
+  // We'll make this flexible to handle the actual response
+  [key: string]: any;
 }
 
 export class QlooApiClient {
@@ -66,13 +58,12 @@ export class QlooApiClient {
    */
   async fetchInsights(preferences: UserPreferencesData): Promise<QlooInsights> {
     const correlationId = CorrelationContext.getCorrelationId();
-    const requestPayload = this.buildQlooRequest(preferences);
 
     ErrorLogger.logInfo(
       "Fetching insights from Qloo API",
       {
         url: this.apiUrl,
-        payload: requestPayload,
+        preferences,
         correlationId,
       },
       "QlooApiClient.fetchInsights"
@@ -82,7 +73,7 @@ export class QlooApiClient {
       // Use circuit breaker with retry handler
       return await this.circuitBreaker.execute(async () => {
         return await this.retryHandler.execute(async () => {
-          const response = await this.makeApiCall(requestPayload);
+          const response = await this.makeApiCall(preferences);
           return this.parseQlooResponse(response);
         }, "QlooApiCall");
       });
@@ -122,45 +113,56 @@ export class QlooApiClient {
   }
 
   /**
-   * Build Qloo API request payload from user preferences
-   */
-  private buildQlooRequest(
-    preferences: UserPreferencesData
-  ): Record<string, any> {
-    return {
-      user_preferences: {
-        genres: preferences.genres,
-        themes: preferences.themes,
-        art_style: preferences.artStyle,
-        target_audience: preferences.targetAudience,
-        content_rating: preferences.contentRating,
-      },
-      request_type: "manga_insights",
-      include_recommendations: true,
-      include_trends: true,
-      max_recommendations: 10,
-      max_trends: 5,
-    };
-  }
-
-  /**
    * Make HTTP request to Qloo API
    */
   private async makeApiCall(
-    payload: Record<string, any>
+    preferences: UserPreferencesData
   ): Promise<QlooApiResponse> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
     try {
-      const response = await fetch(this.apiUrl, {
-        method: "POST",
+      const resolvedGenres = resolveGenreTags(preferences.genres || []);
+      const resolvedThemes = resolveGenreTags(preferences.themes || []);
+
+      // Combine genres and themes as tags
+      const allTags = [...resolvedGenres, ...resolvedThemes].filter(Boolean);
+
+      // Build query parameters for Qloo API
+      const queryParams = new URLSearchParams();
+      queryParams.append("filter.type", "urn:entity:movie");
+
+      if (allTags.length > 0) {
+        queryParams.append("filter.tags", allTags.join(","));
+      }
+
+      // Add content rating if available
+      if (preferences.contentRating) {
+        queryParams.append("filter.content_rating", preferences.contentRating);
+      }
+
+      queryParams.append("take", "10");
+
+      const url = `${this.apiUrl}?${queryParams.toString()}`;
+
+      ErrorLogger.logInfo(
+        "Making Qloo API request",
+        {
+          url,
+          resolvedGenres,
+          resolvedThemes,
+          allTags,
+          originalPreferences: preferences,
+        },
+        "QlooApiClient.makeApiCall"
+      );
+
+      const response = await fetch(url, {
+        method: "GET",
         headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${this.apiKey}`,
+          "x-api-key": this.apiKey,
           "User-Agent": "MangaPlatform/1.0",
         },
-        body: JSON.stringify(payload),
         signal: controller.signal,
       });
 
@@ -168,6 +170,16 @@ export class QlooApiClient {
 
       if (!response.ok) {
         const errorText = await response.text();
+        ErrorLogger.logError(
+          new Error(`Qloo API error response: ${errorText}`),
+          {
+            status: response.status,
+            url,
+            responseBody: errorText,
+          },
+          "QlooApiClient.makeApiCall"
+        );
+
         throw new QlooApiError(
           `Qloo API request failed with status ${response.status}`,
           response.status,
@@ -176,6 +188,16 @@ export class QlooApiClient {
       }
 
       const data = await response.json();
+
+      ErrorLogger.logInfo(
+        "Qloo API response received",
+        {
+          responseKeys: Object.keys(data),
+          dataType: typeof data,
+        },
+        "QlooApiClient.makeApiCall"
+      );
+
       return data as QlooApiResponse;
     } catch (error) {
       clearTimeout(timeoutId);
@@ -206,42 +228,218 @@ export class QlooApiClient {
    * Parse Qloo API response and convert to internal format
    */
   private parseQlooResponse(response: QlooApiResponse): QlooInsights {
-    if (response.status === "error") {
+    ErrorLogger.logInfo(
+      "Parsing Qloo API response",
+      {
+        responseType: typeof response,
+        success: response.success,
+        hasResults: !!response.results,
+        hasEntities: !!(response.results && response.results.entities),
+        entitiesCount: response.results?.entities?.length || 0,
+      },
+      "QlooApiClient.parseQlooResponse"
+    );
+
+    // Check if the response indicates success
+    if (response.success === false) {
       throw new QlooApiError(
         `Qloo API returned error: ${response.message || "Unknown error"}`,
         400,
-        response.message || "API error"
+        JSON.stringify(response)
       );
     }
 
-    // Validate response structure
-    if (!response.recommendations || !Array.isArray(response.recommendations)) {
-      throw new QlooApiError(
-        "Invalid Qloo API response: missing recommendations",
-        500,
-        "Invalid response format"
+    // Extract entities from the Qloo API response structure
+    let entities: any[] = [];
+
+    if (response.results && Array.isArray(response.results.entities)) {
+      entities = response.results.entities;
+    } else if (Array.isArray(response.results)) {
+      // Fallback: results is directly an array
+      entities = response.results;
+    } else if (Array.isArray(response.entities)) {
+      // Fallback: entities at root level
+      entities = response.entities;
+    } else {
+      ErrorLogger.logInfo(
+        "No entities found in Qloo response",
+        {
+          responseStructure: {
+            success: response.success,
+            hasResults: !!response.results,
+            resultsType: typeof response.results,
+            resultsKeys: response.results ? Object.keys(response.results) : [],
+          },
+        },
+        "QlooApiClient.parseQlooResponse"
       );
+      entities = [];
     }
 
-    if (!response.trends || !Array.isArray(response.trends)) {
-      throw new QlooApiError(
-        "Invalid Qloo API response: missing trends",
-        500,
-        "Invalid response format"
-      );
-    }
+    ErrorLogger.logInfo(
+      "Extracted entities from Qloo response",
+      {
+        entitiesCount: entities.length,
+        firstEntityKeys: entities.length > 0 ? Object.keys(entities[0]) : [],
+        firstEntityName: entities.length > 0 ? entities[0].name : null,
+      },
+      "QlooApiClient.parseQlooResponse"
+    );
+
+    // Convert Qloo entities to our internal format
+    const recommendations = entities.slice(0, 10).map((entity, index) => ({
+      category: this.extractCategory(entity),
+      score: this.extractScore(entity, index),
+      attributes: this.extractAttributes(entity),
+    }));
+
+    // Generate trends from the entities
+    const trends = this.generateTrendsFromEntities(entities);
 
     return {
-      recommendations: response.recommendations.map((rec) => ({
-        category: rec.category || "unknown",
-        score: typeof rec.score === "number" ? rec.score : 0,
-        attributes: rec.attributes || {},
-      })),
-      trends: response.trends.map((trend) => ({
-        topic: trend.topic || "unknown",
-        popularity: typeof trend.popularity === "number" ? trend.popularity : 0,
-      })),
+      recommendations,
+      trends,
     };
+  }
+
+  /**
+   * Extract category from Qloo entity
+   */
+  private extractCategory(entity: any): string {
+    // Try direct properties first
+    if (entity.genre) return entity.genre;
+    if (entity.category) return entity.category;
+
+    // Extract from subtype (e.g., "urn:entity:movie" -> "movie")
+    if (entity.subtype && typeof entity.subtype === "string") {
+      const parts = entity.subtype.split(":");
+      const subtype = parts[parts.length - 1];
+      if (subtype && subtype !== "entity") {
+        return subtype;
+      }
+    }
+
+    // Extract genre from tags array (Qloo format: objects with id, name, type)
+    if (entity.tags && Array.isArray(entity.tags) && entity.tags.length > 0) {
+      // Look for genre tags
+      const genreTag = entity.tags.find(
+        (tag: any) =>
+          tag && typeof tag === "object" && tag.type === "urn:tag:genre:media"
+      );
+
+      if (genreTag && genreTag.name) {
+        return genreTag.name.toLowerCase();
+      }
+
+      // Fallback: look for genre in tag IDs
+      const genreTagById = entity.tags.find(
+        (tag: any) =>
+          tag &&
+          typeof tag === "object" &&
+          tag.id &&
+          typeof tag.id === "string" &&
+          tag.id.includes("genre:media:")
+      );
+
+      if (genreTagById) {
+        const parts = genreTagById.id.split(":");
+        return parts[parts.length - 1] || "unknown";
+      }
+    }
+
+    // Fallback to entity type
+    if (entity.type) return entity.type;
+
+    return "movie"; // Default for Qloo movie entities
+  }
+
+  /**
+   * Extract score from Qloo entity
+   */
+  private extractScore(entity: any, fallbackIndex: number): number {
+    if (typeof entity.score === "number") return entity.score;
+    if (typeof entity.rating === "number") return entity.rating / 10; // Normalize to 0-1
+    if (typeof entity.popularity === "number") return entity.popularity;
+    if (typeof entity.relevance === "number") return entity.relevance;
+    // Generate decreasing score based on position
+    return Math.max(0.1, 1 - fallbackIndex * 0.1);
+  }
+
+  /**
+   * Extract attributes from Qloo entity
+   */
+  private extractAttributes(entity: any): Record<string, any> {
+    const attributes: Record<string, any> = {};
+
+    // Basic entity properties
+    if (entity.name) attributes.name = entity.name;
+    if (entity.entity_id) attributes.entityId = entity.entity_id;
+    if (entity.popularity) attributes.popularity = entity.popularity;
+
+    // Properties from the nested properties object
+    if (entity.properties) {
+      const props = entity.properties;
+
+      if (props.description) attributes.description = props.description;
+      if (props.release_year) attributes.releaseYear = props.release_year;
+      if (props.release_date) attributes.releaseDate = props.release_date;
+      if (props.content_rating) attributes.contentRating = props.content_rating;
+      if (props.duration) attributes.duration = props.duration;
+      if (props.image && props.image.url) attributes.imageUrl = props.image.url;
+      if (props.production_companies)
+        attributes.productionCompanies = props.production_companies;
+      if (props.release_country)
+        attributes.releaseCountry = props.release_country;
+    }
+
+    // Tags information (simplified for our use case)
+    if (entity.tags && Array.isArray(entity.tags)) {
+      attributes.tagCount = entity.tags.length;
+      // Extract genre tags specifically
+      const genreTags = entity.tags
+        .filter((tag: any) => tag.type === "urn:tag:genre:media")
+        .map((tag: any) => tag.name);
+      if (genreTags.length > 0) {
+        attributes.genres = genreTags;
+      }
+    }
+
+    // External ratings if available
+    if (entity.external) {
+      if (entity.external.imdb && entity.external.imdb[0]) {
+        attributes.imdbRating = entity.external.imdb[0].user_rating;
+      }
+      if (entity.external.metacritic && entity.external.metacritic[0]) {
+        attributes.metacriticRating =
+          entity.external.metacritic[0].critic_rating;
+      }
+    }
+
+    return attributes;
+  }
+
+  /**
+   * Generate trends from entities (since Qloo might not provide trends directly)
+   */
+  private generateTrendsFromEntities(
+    entities: any[]
+  ): Array<{ topic: string; popularity: number }> {
+    const genreCounts: Record<string, number> = {};
+
+    // Count genres from entities
+    entities.forEach((entity) => {
+      const category = this.extractCategory(entity);
+      genreCounts[category] = (genreCounts[category] || 0) + 1;
+    });
+
+    // Convert to trends format
+    return Object.entries(genreCounts)
+      .sort(([, a], [, b]) => b - a) // Sort by count descending
+      .slice(0, 5) // Top 5 trends
+      .map(([topic, count]) => ({
+        topic: topic.charAt(0).toUpperCase() + topic.slice(1), // Capitalize
+        popularity: Math.min(1, count / entities.length), // Normalize to 0-1
+      }));
   }
 
   /**
