@@ -40,6 +40,7 @@
   "dependencies": {
     "@aws-cdk/aws-lambda-nodejs": "^1.203.0",
     "aws-cdk-lib": "2.201.0",
-    "constructs": "^10.0.0"
+    "constructs": "^10.0.0",
+    "dotenv": "^17.2.0"
   }
 }

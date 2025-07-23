@@ -14,6 +14,9 @@ import { LambdaMonitoringConstruct } from "../constructs/lambda-monitoring-const
 import { EnvironmentConfig } from "../config/environment-config";
 import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
 import * as path from "path";
+import * as dotenv from "dotenv";
+
+dotenv.config({ path: path.join(__dirname, "../../..", ".env") });
 
 export interface ApiStackProps extends cdk.StackProps {
   environment: string;
@@ -458,9 +461,7 @@ export class ApiStack extends cdk.Stack {
         EVENT_BUS_NAME: props.eventBus.eventBusName,
         ENVIRONMENT: props.environment,
         QLOO_API_KEY: process.env.QLOO_API_KEY!,
-        QLOO_API_URL:
-          process.env.QLOO_API_URL ||
-          "https://hackathon.api.qloo.com/v2/insights",
+        QLOO_API_URL: process.env.QLOO_API_URL!,
         // Security-related environment variables
         ENABLE_SECURITY_LOGGING: "true",
         SECURITY_CONTEXT: "preferences",

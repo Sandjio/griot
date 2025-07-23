@@ -128,77 +128,146 @@ export class QlooApiClient {
       // Combine genres and themes as tags
       const allTags = [...resolvedGenres, ...resolvedThemes].filter(Boolean);
 
-      // Build query parameters for Qloo API
-      const queryParams = new URLSearchParams();
-      queryParams.append("filter.type", "urn:entity:movie");
+      // Try different entity types in order of preference
+      // Based on Qloo API supported entities: Artist, Book, Brand, Destination, Movie, Person, Place, Podcast, TV Show, Video Game
+      const entityTypes = [
+        "urn:entity:book", // Most relevant for manga/comics
+        "urn:entity:tv_show", // For anime/animated series
+        "urn:entity:movie", // For live-action adaptations
+        "urn:entity:video_game", // For game adaptations
+      ];
 
-      if (allTags.length > 0) {
-        queryParams.append("filter.tags", allTags.join(","));
+      let lastError: QlooApiError | null = null;
+
+      // Try each entity type until one works
+      for (const entityType of entityTypes) {
+        try {
+          // Build query parameters for Qloo API
+          const queryParams = new URLSearchParams();
+          queryParams.append("filter.type", entityType);
+
+          if (allTags.length > 0) {
+            queryParams.append("filter.tags", allTags.join(","));
+          }
+
+          // Add content rating if available
+          if (preferences.contentRating) {
+            queryParams.append(
+              "filter.content_rating",
+              preferences.contentRating
+            );
+          }
+
+          queryParams.append("take", "10");
+
+          const url = `${this.apiUrl}?${queryParams.toString()}`;
+
+          ErrorLogger.logInfo(
+            "Making Qloo API request",
+            {
+              url,
+              entityType,
+              resolvedGenres,
+              resolvedThemes,
+              allTags,
+              originalPreferences: preferences,
+            },
+            "QlooApiClient.makeApiCall"
+          );
+
+          const response = await fetch(url, {
+            method: "GET",
+            headers: {
+              "x-api-key": this.apiKey,
+              "User-Agent": "MangaPlatform/1.0",
+            },
+            signal: controller.signal,
+          });
+
+          if (!response.ok) {
+            const errorText = await response.text();
+            const error = new QlooApiError(
+              `Qloo API request failed with status ${response.status} for entity type ${entityType}`,
+              response.status,
+              errorText
+            );
+
+            // If it's a 403 (forbidden), try the next entity type
+            if (response.status === 403) {
+              ErrorLogger.logInfo(
+                `Entity type ${entityType} not permitted, trying next type`,
+                {
+                  status: response.status,
+                  entityType,
+                  responseBody: errorText,
+                },
+                "QlooApiClient.makeApiCall"
+              );
+              lastError = error;
+              continue;
+            }
+
+            // For other errors, throw immediately
+            ErrorLogger.logError(
+              new Error(`Qloo API error response: ${errorText}`),
+              {
+                status: response.status,
+                url,
+                entityType,
+                responseBody: errorText,
+              },
+              "QlooApiClient.makeApiCall"
+            );
+            throw error;
+          }
+
+          // Success! Parse and return the response
+          const data = await response.json();
+          ErrorLogger.logInfo(
+            "Qloo API response received",
+            {
+              responseKeys: Object.keys(data),
+              dataType: typeof data,
+              entityType,
+              success: true,
+            },
+            "QlooApiClient.makeApiCall"
+          );
+
+          clearTimeout(timeoutId);
+
+          return data as QlooApiResponse;
+        } catch (error) {
+          if (error instanceof QlooApiError && error.statusCode === 403) {
+            lastError = error;
+            continue; // Try next entity type
+          }
+          throw error; // Re-throw non-403 errors
+        }
       }
 
-      // Add content rating if available
-      if (preferences.contentRating) {
-        queryParams.append("filter.content_rating", preferences.contentRating);
-      }
-
-      queryParams.append("take", "10");
-
-      const url = `${this.apiUrl}?${queryParams.toString()}`;
-
-      ErrorLogger.logInfo(
-        "Making Qloo API request",
-        {
-          url,
-          resolvedGenres,
-          resolvedThemes,
-          allTags,
-          originalPreferences: preferences,
-        },
-        "QlooApiClient.makeApiCall"
-      );
-
-      const response = await fetch(url, {
-        method: "GET",
-        headers: {
-          "x-api-key": this.apiKey,
-          "User-Agent": "MangaPlatform/1.0",
-        },
-        signal: controller.signal,
-      });
-
+      // If we get here, all entity types failed
       clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        const errorText = await response.text();
+      if (lastError) {
         ErrorLogger.logError(
-          new Error(`Qloo API error response: ${errorText}`),
+          new Error(
+            `All entity types failed. Last error: ${lastError.message}`
+          ),
           {
-            status: response.status,
-            url,
-            responseBody: errorText,
+            triedEntityTypes: entityTypes,
+            lastErrorStatus: lastError.statusCode,
+            lastErrorBody: lastError.responseBody,
           },
           "QlooApiClient.makeApiCall"
         );
-
-        throw new QlooApiError(
-          `Qloo API request failed with status ${response.status}`,
-          response.status,
-          errorText
-        );
+        throw lastError;
       }
 
-      const data = await response.json();
-
-      ErrorLogger.logInfo(
-        "Qloo API response received",
-        {
-          responseKeys: Object.keys(data),
-          dataType: typeof data,
-        },
-        "QlooApiClient.makeApiCall"
+      throw new QlooApiError(
+        "All entity types failed with unknown errors",
+        500,
+        "No valid entity type found"
       );
-
-      return data as QlooApiResponse;
     } catch (error) {
       clearTimeout(timeoutId);
 
@@ -350,7 +419,7 @@ export class QlooApiClient {
     // Fallback to entity type
     if (entity.type) return entity.type;
 
-    return "movie"; // Default for Qloo movie entities
+    return "book"; // Default fallback (most relevant for manga platform)
   }
 
   /**
