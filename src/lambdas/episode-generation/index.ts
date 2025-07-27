@@ -189,9 +189,10 @@ const episodeGenerationHandler = async (
         storyId,
         storyTitle: story.title,
         generatedAt: timestamp,
-        tokensUsed:
+        tokensUsed: String(
           (episodeResponse.usage?.inputTokens || 0) +
-          (episodeResponse.usage?.outputTokens || 0),
+            (episodeResponse.usage?.outputTokens || 0)
+        ),
       },
     };
 

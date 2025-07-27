@@ -1,5 +1,6 @@
 import * as cdk from "aws-cdk-lib";
 import * as lambda from "aws-cdk-lib/aws-lambda";
+import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
 import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as events from "aws-cdk-lib/aws-events";
@@ -10,6 +11,7 @@ import { SecurityConstruct } from "../constructs/security-construct";
 import { LambdaMonitoringConstruct } from "../constructs/lambda-monitoring-construct";
 import { EventBridgeConstruct } from "../constructs/eventbridge-construct";
 import { EnvironmentConfig } from "../config/environment-config";
+import * as path from "path";
 
 export interface ProcessingStackProps extends cdk.StackProps {
   environment: string;
@@ -69,19 +71,30 @@ export class ProcessingStack extends cdk.Stack {
     );
 
     // Create Lambda function
-    const storyGenerationLambda = new lambda.Function(
+    const storyGenerationLambda = new NodejsFunction(
       this,
       "StoryGenerationLambda",
       {
         functionName: `manga-story-generation-${props.environment}`,
-        runtime: lambda.Runtime.NODEJS_18_X,
-        handler: "index.handler",
-        code: lambda.Code.fromAsset("../src/lambdas/story-generation"),
+        runtime: lambda.Runtime.NODEJS_20_X,
+        handler: "handler",
+        entry: path.join(
+          __dirname,
+          "../../..",
+          "/src/lambdas/story-generation/index.ts"
+        ),
         role: this.securityConstruct.storyGenerationRole,
+        bundling: {
+          externalModules: ["aws-sdk"], // Exclude aws-sdk from bundling
+          minify: true, // Minify the code for performance
+          sourceMap: true, // Enable source maps for debugging
+          target: "es2020", // Target modern JavaScript
+        },
+        projectRoot: path.join(__dirname, "../../.."),
         environment: {
-          MANGA_TABLE_NAME: props.mangaTable.tableName,
-          CONTENT_BUCKET_NAME: props.contentBucket.bucketName,
-          EVENT_BUS_NAME: props.eventBus.eventBusName,
+          DYNAMODB_TABLE_NAME: props.mangaTable.tableName,
+          S3_BUCKET_NAME: props.contentBucket.bucketName,
+          EVENTBRIDGE_BUS_NAME: props.eventBus.eventBusName,
           ENVIRONMENT: props.environment,
           // Security-related environment variables
           ENABLE_SECURITY_LOGGING: "true",
@@ -146,9 +159,9 @@ export class ProcessingStack extends cdk.Stack {
         code: lambda.Code.fromAsset("../src/lambdas/episode-generation"),
         role: this.securityConstruct.episodeGenerationRole,
         environment: {
-          MANGA_TABLE_NAME: props.mangaTable.tableName,
-          CONTENT_BUCKET_NAME: props.contentBucket.bucketName,
-          EVENT_BUS_NAME: props.eventBus.eventBusName,
+          DYNAMODB_TABLE_NAME: props.mangaTable.tableName,
+          S3_BUCKET_NAME: props.contentBucket.bucketName,
+          EVENTBRIDGE_BUS_NAME: props.eventBus.eventBusName,
           ENVIRONMENT: props.environment,
           // Security-related environment variables
           ENABLE_SECURITY_LOGGING: "true",
@@ -213,9 +226,9 @@ export class ProcessingStack extends cdk.Stack {
         code: lambda.Code.fromAsset("../src/lambdas/image-generation"),
         role: this.securityConstruct.imageGenerationRole,
         environment: {
-          MANGA_TABLE_NAME: props.mangaTable.tableName,
-          CONTENT_BUCKET_NAME: props.contentBucket.bucketName,
-          EVENT_BUS_NAME: props.eventBus.eventBusName,
+          DYNAMODB_TABLE_NAME: props.mangaTable.tableName,
+          S3_BUCKET_NAME: props.contentBucket.bucketName,
+          EVENTBRIDGE_BUS_NAME: props.eventBus.eventBusName,
           ENVIRONMENT: props.environment,
           // Security-related environment variables
           ENABLE_SECURITY_LOGGING: "true",

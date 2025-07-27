@@ -520,7 +520,7 @@ export class SecurityConstruct extends Construct {
               resources: [props.eventBus.eventBusArn],
               conditions: {
                 StringEquals: {
-                  "events:source": ["manga.story"],
+                  "events:source": ["manga.story", "manga.generation"],
                 },
               },
             }),
@@ -600,7 +600,7 @@ export class SecurityConstruct extends Construct {
               resources: [props.eventBus.eventBusArn],
               conditions: {
                 StringEquals: {
-                  "events:source": ["manga.episode"],
+                  "events:source": ["manga.episode", "mana.generation"],
                 },
               },
             }),
@@ -682,7 +682,7 @@ export class SecurityConstruct extends Construct {
               resources: [props.eventBus.eventBusArn],
               conditions: {
                 StringEquals: {
-                  "events:source": ["manga.image"],
+                  "events:source": ["manga.image", "manga.generation"],
                 },
               },
             }),

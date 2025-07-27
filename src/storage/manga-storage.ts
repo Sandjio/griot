@@ -43,6 +43,18 @@ export class MangaStorageService {
     const key = this.getStoryKey(userId, storyId);
     const content = this.formatStoryMarkdown(story);
 
+    // Ensure all metadata values are strings and valid HTTP header values (S3 requirement)
+    const sanitizedMetadata = story.metadata
+      ? Object.fromEntries(
+          Object.entries(story.metadata).map(([key, value]) => [
+            key,
+            this.sanitizeHeaderValue(
+              typeof value === "string" ? value : String(value)
+            ),
+          ])
+        )
+      : {};
+
     return await this.s3Client.putObject(key, content, {
       ContentType: "text/markdown",
       Metadata: {
@@ -50,7 +62,7 @@ export class MangaStorageService {
         storyId,
         title: story.title,
         createdAt: new Date().toISOString(),
-        ...story.metadata,
+        ...sanitizedMetadata,
       },
     });
   }
@@ -86,6 +98,18 @@ export class MangaStorageService {
     const key = this.getEpisodeKey(userId, storyId, episode.episodeNumber);
     const content = this.formatEpisodeMarkdown(episode);
 
+    // Ensure all metadata values are strings and valid HTTP header values (S3 requirement)
+    const sanitizedMetadata = episode.metadata
+      ? Object.fromEntries(
+          Object.entries(episode.metadata).map(([key, value]) => [
+            key,
+            this.sanitizeHeaderValue(
+              typeof value === "string" ? value : String(value)
+            ),
+          ])
+        )
+      : {};
+
     return await this.s3Client.putObject(key, content, {
       ContentType: "text/markdown",
       Metadata: {
@@ -94,7 +118,7 @@ export class MangaStorageService {
         episodeNumber: episode.episodeNumber.toString(),
         title: episode.title,
         createdAt: new Date().toISOString(),
-        ...episode.metadata,
+        ...sanitizedMetadata,
       },
     });
   }
@@ -339,6 +363,22 @@ export class MangaStorageService {
       : "";
 
     return `${metadata}# Episode ${episode.episodeNumber}: ${episode.title}\n\n${episode.content}`;
+  }
+
+  /**
+   * Sanitize metadata values to be valid HTTP header values
+   * S3 metadata becomes HTTP headers, so they must follow HTTP header rules
+   */
+  private sanitizeHeaderValue(value: string): string {
+    // Remove or replace characters that are not allowed in HTTP headers
+    // HTTP headers must be ASCII and cannot contain control characters
+    return value
+      .replace(/[\x00-\x1F\x7F-\xFF]/g, "") // Remove control characters and non-ASCII
+      .replace(/[<>"'&]/g, "") // Remove HTML-problematic characters
+      .replace(/\r?\n/g, " ") // Replace newlines with spaces
+      .replace(/\s+/g, " ") // Collapse multiple spaces
+      .trim()
+      .substring(0, 2048); // Limit length (S3 metadata has size limits)
   }
 }
 

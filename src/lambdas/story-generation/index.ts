@@ -194,6 +194,8 @@ const storyGenerationHandler = async (
     const { title, content } = parseStoryContent(storyResponse.content);
 
     // Create story content object
+    // Note: Excluding insights from S3 metadata due to size and special characters
+    // The insights data is preserved in the story content itself
     const storyContent: StoryContent = {
       title,
       content,
@@ -202,11 +204,11 @@ const storyGenerationHandler = async (
         userId,
         requestId,
         preferences: JSON.stringify(preferences),
-        insights: JSON.stringify(insights),
         generatedAt: timestamp,
-        tokensUsed:
+        tokensUsed: String(
           (storyResponse.usage?.inputTokens || 0) +
-          (storyResponse.usage?.outputTokens || 0),
+            (storyResponse.usage?.outputTokens || 0)
+        ),
       },
     };
 
