@@ -149,15 +149,26 @@ export class ProcessingStack extends cdk.Stack {
     );
 
     // Create Lambda function
-    const episodeGenerationLambda = new lambda.Function(
+    const episodeGenerationLambda = new NodejsFunction(
       this,
       "EpisodeGenerationLambda",
       {
         functionName: `manga-episode-generation-${props.environment}`,
-        runtime: lambda.Runtime.NODEJS_18_X,
-        handler: "index.handler",
-        code: lambda.Code.fromAsset("../src/lambdas/episode-generation"),
+        runtime: lambda.Runtime.NODEJS_20_X,
+        handler: "handler",
+        entry: path.join(
+          __dirname,
+          "../../..",
+          "/src/lambdas/episode-generation/index.ts"
+        ),
         role: this.securityConstruct.episodeGenerationRole,
+        bundling: {
+          externalModules: ["aws-sdk"], // Exclude aws-sdk from bundling
+          minify: true, // Minify the code for performance
+          sourceMap: true, // Enable source maps for debugging
+          target: "es2020", // Target modern JavaScript
+        },
+        projectRoot: path.join(__dirname, "../../.."),
         environment: {
           DYNAMODB_TABLE_NAME: props.mangaTable.tableName,
           S3_BUCKET_NAME: props.contentBucket.bucketName,

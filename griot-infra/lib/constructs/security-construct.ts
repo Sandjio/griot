@@ -600,7 +600,7 @@ export class SecurityConstruct extends Construct {
               resources: [props.eventBus.eventBusArn],
               conditions: {
                 StringEquals: {
-                  "events:source": ["manga.episode", "mana.generation"],
+                  "events:source": ["manga.episode", "manga.generation"],
                 },
               },
             }),

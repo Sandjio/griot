@@ -240,14 +240,33 @@ const episodeGenerationHandler = async (
       episodeNumber,
     });
 
-    // Publish status update event
-    await EventPublishingHelpers.publishStatusUpdate(
-      userId,
-      story.userId, // Use the story's associated request ID if available
-      "EPISODE",
-      "COMPLETED",
-      episodeId
-    );
+    // Publish status update event (non-blocking)
+    try {
+      await EventPublishingHelpers.publishStatusUpdate(
+        userId,
+        story.userId, // Use the story's associated request ID if available
+        "EPISODE",
+        "COMPLETED",
+        episodeId
+      );
+      console.log("Successfully published status update event", {
+        userId,
+        storyId,
+        episodeId,
+        episodeNumber,
+      });
+    } catch (statusError) {
+      console.warn("Failed to publish status update event (non-critical)", {
+        userId,
+        storyId,
+        episodeId,
+        episodeNumber,
+        error:
+          statusError instanceof Error
+            ? statusError.message
+            : String(statusError),
+      });
+    }
 
     console.log("Episode generation completed successfully", {
       userId,
@@ -275,15 +294,31 @@ const episodeGenerationHandler = async (
         });
       }
 
-      // Publish status update event for failure
-      await EventPublishingHelpers.publishStatusUpdate(
-        userId,
-        storyId, // Use storyId as fallback for requestId
-        "EPISODE",
-        "FAILED",
-        episodeId,
-        error instanceof Error ? error.message : String(error)
-      );
+      // Publish status update event for failure (non-blocking)
+      try {
+        await EventPublishingHelpers.publishStatusUpdate(
+          userId,
+          storyId, // Use storyId as fallback for requestId
+          "EPISODE",
+          "FAILED",
+          episodeId,
+          error instanceof Error ? error.message : String(error)
+        );
+      } catch (statusError) {
+        console.warn(
+          "Failed to publish failure status update event (non-critical)",
+          {
+            userId,
+            storyId,
+            episodeId,
+            episodeNumber,
+            statusError:
+              statusError instanceof Error
+                ? statusError.message
+                : String(statusError),
+          }
+        );
+      }
     } catch (cleanupError) {
       console.error("Error during cleanup after episode generation failure", {
         userId,
