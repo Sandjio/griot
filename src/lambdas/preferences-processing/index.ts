@@ -413,6 +413,15 @@ const preferencesProcessingHandler = async (
         "PROCESSING"
       );
 
+      // Log environment variables for debugging
+      ErrorLogger.logInfo("EventBridge configuration check", {
+        userId,
+        requestId,
+        eventBusName: process.env.EVENT_BUS_NAME,
+        hasEventBusName: !!process.env.EVENT_BUS_NAME,
+        awsRegion: process.env.AWS_REGION,
+      });
+
       // Publish story generation event to EventBridge with timing
       const eventTimer = new PerformanceTimer("EventBridge-Publish");
       await EventPublishingHelpers.publishStoryGeneration(
@@ -431,7 +440,13 @@ const preferencesProcessingHandler = async (
     } catch (error) {
       ErrorLogger.logError(
         error instanceof Error ? error : new Error(String(error)),
-        { userId, requestId, operation: "EventBridge-Publish" },
+        {
+          userId,
+          requestId,
+          operation: "EventBridge-Publish",
+          eventBusName: process.env.EVENT_BUS_NAME,
+          errorDetails: error instanceof Error ? error.message : String(error),
+        },
         "PreferencesProcessing"
       );
 

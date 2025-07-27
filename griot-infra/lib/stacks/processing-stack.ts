@@ -3,6 +3,7 @@ import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as events from "aws-cdk-lib/aws-events";
+import * as targets from "aws-cdk-lib/aws-events-targets";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 import { Construct } from "constructs";
 import { SecurityConstruct } from "../constructs/security-construct";
@@ -48,8 +49,8 @@ export class ProcessingStack extends cdk.Stack {
     this.createImageGenerationLambda(props);
 
     // Configure EventBridge rules to trigger Lambda functions
-    // Note: EventBridge rules configuration is commented out to avoid circular dependencies
-    // this.configureEventBridgeRules(props);
+    // Note: EventBridge targets are configured post-deployment to avoid circular dependencies
+    // See scripts/configure-eventbridge-targets.sh
   }
 
   /**
@@ -254,6 +255,38 @@ export class ProcessingStack extends cdk.Stack {
   }
 
   /**
+   * Configure EventBridge targets directly to avoid circular dependencies
+   */
+  private configureEventBridgeTargetsDirectly(
+    props: ProcessingStackProps
+  ): void {
+    // Add Lambda targets directly to the EventBridge rules
+    props.eventBridgeConstruct.storyGenerationRule.addTarget(
+      new targets.LambdaFunction(this.lambdaFunctions.storyGeneration, {
+        deadLetterQueue: props.eventBridgeConstruct.storyGenerationDLQ,
+        maxEventAge: cdk.Duration.hours(2),
+        retryAttempts: 3,
+      })
+    );
+
+    props.eventBridgeConstruct.episodeGenerationRule.addTarget(
+      new targets.LambdaFunction(this.lambdaFunctions.episodeGeneration, {
+        deadLetterQueue: props.eventBridgeConstruct.episodeGenerationDLQ,
+        maxEventAge: cdk.Duration.hours(2),
+        retryAttempts: 3,
+      })
+    );
+
+    props.eventBridgeConstruct.imageGenerationRule.addTarget(
+      new targets.LambdaFunction(this.lambdaFunctions.imageGeneration, {
+        deadLetterQueue: props.eventBridgeConstruct.imageGenerationDLQ,
+        maxEventAge: cdk.Duration.hours(2),
+        retryAttempts: 3,
+      })
+    );
+  }
+
+  /**
    * Configure EventBridge rules to trigger Lambda functions
    */
   private configureEventBridgeRules(props: ProcessingStackProps): void {
@@ -265,6 +298,24 @@ export class ProcessingStack extends cdk.Stack {
       this.lambdaFunctions.episodeGeneration
     );
     props.eventBridgeConstruct.addImageGenerationTarget(
+      this.lambdaFunctions.imageGeneration
+    );
+  }
+
+  /**
+   * Configure EventBridge targets after stack creation to avoid circular dependencies
+   */
+  public configureEventBridgeTargets(
+    eventBridgeConstruct: EventBridgeConstruct
+  ): void {
+    // Configure EventBridge rules to trigger the Lambda functions
+    eventBridgeConstruct.addStoryGenerationTarget(
+      this.lambdaFunctions.storyGeneration
+    );
+    eventBridgeConstruct.addEpisodeGenerationTarget(
+      this.lambdaFunctions.episodeGeneration
+    );
+    eventBridgeConstruct.addImageGenerationTarget(
       this.lambdaFunctions.imageGeneration
     );
   }

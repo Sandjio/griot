@@ -66,4 +66,12 @@ case $STACK in
 esac
 
 echo "✅ Deployment completed successfully!"
+
+# Configure EventBridge targets post-deployment to avoid circular dependencies
+if [ "$STACK" = "all" ] || [ "$STACK" = "processing" ]; then
+  echo ""
+  echo "🎯 Configuring EventBridge targets..."
+  ./scripts/configure-eventbridge-targets.sh $ENVIRONMENT
+fi
+
 echo "🔗 Check the AWS Console for stack outputs and resources"

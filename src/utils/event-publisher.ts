@@ -19,7 +19,13 @@ export class EventPublisher {
     this.eventBridgeClient = new EventBridgeClient({
       region: process.env.AWS_REGION || "us-east-1",
     });
-    this.eventBusName = eventBusName || process.env.EVENT_BUS_NAME || "";
+    // Fallback to environment-specific bus name if EVENT_BUS_NAME is not set
+    const environment = process.env.ENVIRONMENT || "dev";
+    const fallbackBusName = `manga-platform-events-${environment}`;
+    this.eventBusName =
+      eventBusName || process.env.EVENT_BUS_NAME || fallbackBusName;
+
+    console.log(`EventPublisher initialized with bus: "${this.eventBusName}"`);
   }
 
   /**
@@ -117,6 +123,17 @@ export class EventPublisher {
    */
   async publishEvent(event: MangaPlatformEvent): Promise<void> {
     try {
+      // Log the event bus name for debugging
+      console.log(
+        `Publishing event to EventBridge bus: "${this.eventBusName}"`,
+        {
+          source: event.source,
+          detailType: event["detail-type"],
+          eventBusName: this.eventBusName,
+          hasEventBusName: !!this.eventBusName,
+        }
+      );
+
       const command = new PutEventsCommand({
         Entries: [
           {

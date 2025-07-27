@@ -127,6 +127,8 @@ monitoringStack.addDependency(coreStack);
 monitoringStack.addDependency(apiStack);
 monitoringStack.addDependency(processingStack);
 
+// Note: EventBridge targets are configured directly in the ProcessingStack to avoid circular dependencies
+
 // Tags for all stacks
 cdk.Tags.of(app).add("Project", "MangaPlatform");
 cdk.Tags.of(app).add("Environment", environment);
