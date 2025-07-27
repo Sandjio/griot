@@ -227,15 +227,26 @@ export class ProcessingStack extends cdk.Stack {
     );
 
     // Create Lambda function
-    const imageGenerationLambda = new lambda.Function(
+    const imageGenerationLambda = new NodejsFunction(
       this,
       "ImageGenerationLambda",
       {
         functionName: `manga-image-generation-${props.environment}`,
-        runtime: lambda.Runtime.NODEJS_18_X,
-        handler: "index.handler",
-        code: lambda.Code.fromAsset("../src/lambdas/image-generation"),
+        runtime: lambda.Runtime.NODEJS_20_X,
+        handler: "handler",
+        entry: path.join(
+          __dirname,
+          "../../..",
+          "/src/lambdas/image-generation/index.ts"
+        ),
         role: this.securityConstruct.imageGenerationRole,
+        bundling: {
+          externalModules: ["aws-sdk"], // Exclude aws-sdk from bundling
+          minify: true, // Minify the code for performance
+          sourceMap: true, // Enable source maps for debugging
+          target: "es2020", // Target modern JavaScript
+        },
+        projectRoot: path.join(__dirname, "../../.."),
         environment: {
           DYNAMODB_TABLE_NAME: props.mangaTable.tableName,
           S3_BUCKET_NAME: props.contentBucket.bucketName,

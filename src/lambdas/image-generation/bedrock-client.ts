@@ -37,6 +37,7 @@ export class BedrockImageClient {
       modelId: this.modelId,
       promptLength: enhancedPrompt.length,
       originalPrompt: prompt.substring(0, 100) + "...",
+      enhancedPrompt: enhancedPrompt,
     });
 
     try {
@@ -51,13 +52,12 @@ export class BedrockImageClient {
             weight: -1,
           },
         ],
-        cfg_scale: 10,
+        cfg_scale: 7,
         seed: Math.floor(Math.random() * 1000000),
-        steps: 30,
-        width: 1024,
-        height: 1024,
+        steps: 20,
+        width: 512,
+        height: 512,
         samples: 1,
-        style_preset: "manga",
       };
 
       const command = new InvokeModelCommand({
@@ -195,47 +195,32 @@ export class BedrockImageClient {
    * Enhance prompt for manga-style image generation
    */
   private enhancePromptForManga(prompt: string, style: string): string {
-    // Clean and prepare the base prompt
-    let enhancedPrompt = prompt.trim();
+    // Start with a very clean base prompt
+    let cleanPrompt = prompt.trim();
 
-    // Add manga-specific style elements
-    const mangaStyleElements = [
-      "manga style",
-      "black and white",
-      "detailed line art",
-      "dramatic shading",
-      "high contrast",
-      "clean lines",
-      "screen tones",
-      "Japanese manga aesthetic",
-    ];
+    // Remove any potentially problematic characters that Stability AI doesn't like
+    cleanPrompt = cleanPrompt
+      .replace(/['"]/g, "") // Remove quotes
+      .replace(/[:;]/g, "") // Remove colons and semicolons
+      .replace(/[{}[\]]/g, "") // Remove brackets
+      .replace(/[#*_]/g, "") // Remove markdown
+      .replace(/\s+/g, " ") // Normalize spaces
+      .trim();
 
-    // Add style elements if not already present
-    const lowerPrompt = enhancedPrompt.toLowerCase();
-    const missingElements = mangaStyleElements.filter(
-      (element) => !lowerPrompt.includes(element.toLowerCase())
-    );
-
-    if (missingElements.length > 0) {
-      enhancedPrompt += `, ${missingElements.join(", ")}`;
+    // Keep it simple and short - Stability AI prefers concise prompts
+    if (cleanPrompt.length > 200) {
+      cleanPrompt = cleanPrompt.substring(0, 200).trim();
+      // Don't cut mid-word
+      const lastSpace = cleanPrompt.lastIndexOf(" ");
+      if (lastSpace > 150) {
+        cleanPrompt = cleanPrompt.substring(0, lastSpace);
+      }
     }
 
-    // Add quality enhancers
-    const qualityEnhancers = [
-      "high quality",
-      "detailed",
-      "professional manga art",
-      "clean composition",
-    ];
+    // Create a simple, safe prompt format
+    const safePrompt = `${cleanPrompt}, manga style, black and white, detailed line art`;
 
-    enhancedPrompt += `, ${qualityEnhancers.join(", ")}`;
-
-    // Ensure prompt is not too long (Stable Diffusion has limits)
-    if (enhancedPrompt.length > 1000) {
-      enhancedPrompt = enhancedPrompt.substring(0, 1000) + "...";
-    }
-
-    return enhancedPrompt;
+    return safePrompt;
   }
 
   /**
