@@ -44,16 +44,16 @@
     - Add user-friendly error message transformation
     - _Requirements: 2.4, 3.4, 4.5, 5.6_
 
-- [ ] 4. Create landing page with authentication integration
+- [x] 4. Create landing page with authentication integration
 
-  - [ ] 4.1 Build responsive landing page component
+  - [x] 4.1 Build responsive landing page component
 
     - Design hero section with platform branding and description
     - Create feature highlights section showcasing manga platform benefits
     - Implement responsive design that works across all screen sizes
     - _Requirements: 1.1, 1.4, 1.5_
 
-  - [ ] 4.2 Add authentication buttons and navigation
+  - [x] 4.2 Add authentication buttons and navigation
     - Create Sign Up and Login buttons with proper styling
     - Implement click handlers that redirect to Cognito Managed UI
     - Add proper OAuth parameters and state management for security
