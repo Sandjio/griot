@@ -38,6 +38,14 @@ export interface AuthContextType {
   hasValidTokens: () => boolean;
 }
 
+// Extended context type for internal use
+export interface ExtendedAuthContextType extends AuthContextType {
+  updateUser: (user: User) => void;
+  handleCallback: (searchParams: URLSearchParams) => Promise<void>;
+  error: string | null;
+  clearError: () => void;
+}
+
 // Cognito Configuration
 export interface CognitoConfig {
   userPoolId: string;
