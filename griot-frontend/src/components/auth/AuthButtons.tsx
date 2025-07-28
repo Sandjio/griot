@@ -4,7 +4,7 @@ import { AuthUtils } from "@/lib/auth";
 
 export default function AuthButtons() {
   const handleSignUp = () => {
-    AuthUtils.login();
+    AuthUtils.signup();
   };
 
   const handleLogin = () => {

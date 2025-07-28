@@ -185,7 +185,11 @@ export class TokenManager {
    */
   static async refreshTokens(refreshToken: string): Promise<TokenSet> {
     try {
-      const tokenEndpoint = `https://${cognitoConfig.domain}/oauth2/token`;
+      // Handle domain with or without protocol
+      const baseUrl = cognitoConfig.domain.startsWith("http")
+        ? cognitoConfig.domain
+        : `https://${cognitoConfig.domain}`;
+      const tokenEndpoint = `${baseUrl}/oauth2/token`;
 
       const body = new URLSearchParams({
         grant_type: "refresh_token",
@@ -360,9 +364,9 @@ export class CognitoOAuth {
   }
 
   /**
-   * Generate Cognito OAuth authorization URL
+   * Generate Cognito OAuth authorization URL for login
    */
-  static generateAuthUrl(config: CognitoConfig = cognitoConfig): string {
+  static generateLoginUrl(config: CognitoConfig = cognitoConfig): string {
     const state = this.generateState();
     this.storeState(state);
 
@@ -374,7 +378,33 @@ export class CognitoOAuth {
       state: state,
     });
 
-    return `https://${config.domain}/oauth2/authorize?${params.toString()}`;
+    // Handle domain with or without protocol
+    const baseUrl = config.domain.startsWith("http")
+      ? config.domain
+      : `https://${config.domain}`;
+    return `${baseUrl}/login?${params.toString()}`;
+  }
+
+  /**
+   * Generate Cognito OAuth authorization URL for signup
+   */
+  static generateSignupUrl(config: CognitoConfig = cognitoConfig): string {
+    const state = this.generateState();
+    this.storeState(state);
+
+    const params = new URLSearchParams({
+      response_type: "code",
+      client_id: config.clientId,
+      redirect_uri: config.redirectUri,
+      scope: config.scopes.join(" "),
+      state: state,
+    });
+
+    // Handle domain with or without protocol
+    const baseUrl = config.domain.startsWith("http")
+      ? config.domain
+      : `https://${config.domain}`;
+    return `${baseUrl}/signup?${params.toString()}`;
   }
 
   /**
@@ -386,7 +416,11 @@ export class CognitoOAuth {
       logout_uri: config.logoutUri,
     });
 
-    return `https://${config.domain}/logout?${params.toString()}`;
+    // Handle domain with or without protocol
+    const baseUrl = config.domain.startsWith("http")
+      ? config.domain
+      : `https://${config.domain}`;
+    return `${baseUrl}/logout?${params.toString()}`;
   }
 
   /**
@@ -397,7 +431,11 @@ export class CognitoOAuth {
     config: CognitoConfig = cognitoConfig
   ): Promise<TokenSet> {
     try {
-      const tokenEndpoint = `https://${config.domain}/oauth2/token`;
+      // Handle domain with or without protocol
+      const baseUrl = config.domain.startsWith("http")
+        ? config.domain
+        : `https://${config.domain}`;
+      const tokenEndpoint = `${baseUrl}/oauth2/token`;
 
       const body = new URLSearchParams({
         grant_type: "authorization_code",
@@ -512,11 +550,19 @@ export class CognitoOAuth {
  */
 export class AuthUtils {
   /**
-   * Initialize authentication - redirect to Cognito login
+   * Redirect to Cognito login page
    */
   static login(): void {
-    const authUrl = CognitoOAuth.generateAuthUrl();
-    window.location.href = authUrl;
+    const loginUrl = CognitoOAuth.generateLoginUrl();
+    window.location.href = loginUrl;
+  }
+
+  /**
+   * Redirect to Cognito signup page
+   */
+  static signup(): void {
+    const signupUrl = CognitoOAuth.generateSignupUrl();
+    window.location.href = signupUrl;
   }
 
   /**
