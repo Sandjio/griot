@@ -470,7 +470,7 @@ export class CognitoOAuth {
     const code = searchParams.get("code");
     const state = searchParams.get("state");
     const error = searchParams.get("error");
-    const errorDescription = searchParams.get("error_description");
+    const errorDescription = searchParams.get("error_description") ?? undefined;
 
     // Check for OAuth errors
     if (error) {

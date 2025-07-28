@@ -150,7 +150,7 @@ export function useAuthRedirect(options: AuthRedirectOptions = {}) {
    * Check if user needs to complete preferences
    */
   const needsPreferences = useCallback((): boolean => {
-    return isAuthenticated && user && !user.hasPreferences;
+    return Boolean(isAuthenticated && user && !user.hasPreferences);
   }, [isAuthenticated, user]);
 
   /**

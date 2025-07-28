@@ -23,6 +23,23 @@ export interface ApiError {
   timestamp: string;
 }
 
+// Extended API Error for internal use
+export enum ApiErrorType {
+  NETWORK_ERROR = "NETWORK_ERROR",
+  AUTHENTICATION_ERROR = "AUTHENTICATION_ERROR",
+  AUTHORIZATION_ERROR = "AUTHORIZATION_ERROR",
+  VALIDATION_ERROR = "VALIDATION_ERROR",
+  SERVER_ERROR = "SERVER_ERROR",
+  TIMEOUT_ERROR = "TIMEOUT_ERROR",
+  UNKNOWN_ERROR = "UNKNOWN_ERROR",
+}
+
+export interface ExtendedApiError extends ApiError {
+  type: ApiErrorType;
+  status?: number;
+  retryable: boolean;
+}
+
 // User Preferences
 export type ArtStyle =
   | "Traditional"
