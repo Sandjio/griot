@@ -1,4 +1,4 @@
-import AuthButtons from "@/components/auth/AuthButtons";
+import LazyAuthButtons from "@/components/lazy/LazyAuthButtons";
 import { MainLayout } from "@/components/layout";
 
 export default function Home() {
@@ -32,7 +32,7 @@ export default function Home() {
 
               {/* Authentication Buttons */}
               <div className="mt-12 flex flex-col gap-4 sm:flex-row sm:justify-center">
-                <AuthButtons />
+                <LazyAuthButtons />
               </div>
             </div>
           </div>

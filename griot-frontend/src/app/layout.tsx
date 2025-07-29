@@ -4,6 +4,7 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import { NotificationProvider } from "@/contexts/NotificationContext";
 import { ErrorBoundary } from "@/components/error/ErrorBoundary";
 import { NotificationContainer } from "@/components/notifications/NotificationContainer";
+import { PerformanceProvider } from "@/components/performance/PerformanceProvider";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -29,14 +30,36 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
+      <head>
+        {/* DNS prefetch for external domains */}
+        <link rel="dns-prefetch" href="//fonts.googleapis.com" />
+        <link rel="dns-prefetch" href="//fonts.gstatic.com" />
+
+        {/* Preconnect to critical domains */}
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link
+          rel="preconnect"
+          href="https://fonts.gstatic.com"
+          crossOrigin="anonymous"
+        />
+
+        {/* Resource hints for better performance */}
+        <meta
+          name="viewport"
+          content="width=device-width, initial-scale=1, viewport-fit=cover"
+        />
+        <meta name="theme-color" content="#7c3aed" />
+      </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <ErrorBoundary>
-          <NotificationProvider>
-            <AuthProvider>{children}</AuthProvider>
-            <NotificationContainer />
-          </NotificationProvider>
+          <PerformanceProvider>
+            <NotificationProvider>
+              <AuthProvider>{children}</AuthProvider>
+              <NotificationContainer />
+            </NotificationProvider>
+          </PerformanceProvider>
         </ErrorBoundary>
       </body>
     </html>

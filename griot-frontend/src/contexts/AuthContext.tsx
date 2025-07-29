@@ -18,6 +18,7 @@ import {
   AuthErrorType,
 } from "@/types/auth";
 import { AuthUtils, TokenManager, UserManager } from "@/lib/auth";
+import { setUserId, reportCustomEvent } from "@/lib/monitoring";
 
 // Authentication state actions
 type AuthAction =
@@ -47,6 +48,16 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
       };
 
     case "SET_AUTHENTICATED":
+      // Set user ID for monitoring
+      setUserId(action.payload.user.id);
+
+      // Report authentication event
+      reportCustomEvent("user_authenticated", {
+        userId: action.payload.user.id,
+        email: action.payload.user.email,
+        hasPreferences: action.payload.user.hasPreferences,
+      });
+
       return {
         status: "authenticated",
         user: action.payload.user,
@@ -55,6 +66,14 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
       };
 
     case "SET_UNAUTHENTICATED":
+      // Report logout event if there was a previous user
+      if (state.user) {
+        reportCustomEvent("user_logged_out", {
+          userId: state.user.id,
+          email: state.user.email,
+        });
+      }
+
       return {
         status: "unauthenticated",
         user: null,

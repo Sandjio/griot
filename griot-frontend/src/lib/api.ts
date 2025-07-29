@@ -4,8 +4,13 @@ import {
   ApiErrorType,
   ExtendedApiError,
 } from "@/types/api";
-import { TokenManager } from "./auth";
 import { config } from "./config";
+
+// Lazy load TokenManager to reduce initial bundle size
+const getTokenManager = async () => {
+  const { TokenManager } = await import("./auth");
+  return TokenManager;
+};
 
 // Retry configuration
 interface RetryConfig {
@@ -35,7 +40,7 @@ export class HttpClient implements ApiClient {
   private retryConfig: RetryConfig;
 
   constructor(
-    baseURL: string = config.NEXT_PUBLIC_API_BASE_URL,
+    baseURL: string = config.apiBaseUrl,
     retryConfig: RetryConfig = DEFAULT_RETRY_CONFIG
   ) {
     this.baseURL = baseURL.replace(/\/$/, ""); // Remove trailing slash
@@ -84,6 +89,7 @@ export class HttpClient implements ApiClient {
    * Get authorization headers with token injection
    */
   private async getAuthHeaders(): Promise<Record<string, string>> {
+    const TokenManager = await getTokenManager();
     const accessToken = TokenManager.getAccessToken();
 
     if (!accessToken) {
@@ -165,6 +171,7 @@ export class HttpClient implements ApiClient {
     // Handle authentication errors (401)
     if (response.status === 401) {
       // Try to refresh tokens
+      const TokenManager = await getTokenManager();
       const tokens = TokenManager.retrieveTokens();
       if (tokens?.refreshToken) {
         try {

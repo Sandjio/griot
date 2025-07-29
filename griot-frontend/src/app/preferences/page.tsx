@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import PreferencesForm from "../../components/preferences/PreferencesForm";
+import LazyPreferencesForm from "../../components/lazy/LazyPreferencesForm";
 import { UserPreferences } from "../../types/api";
 import { useAuthInternal } from "../../hooks/useAuth";
 import { usePreferencesFlow } from "../../hooks/usePreferencesFlow";
@@ -91,7 +91,7 @@ export default function PreferencesPage() {
           </p>
         </div>
 
-        <PreferencesForm
+        <LazyPreferencesForm
           onSubmit={handleSubmit}
           isLoading={isLoading}
           error={error}
