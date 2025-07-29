@@ -106,12 +106,21 @@ export class SecureStorage {
  */
 export class TokenManager {
   /**
-   * Store tokens securely
+   * Store tokens securely in both localStorage and cookies
    */
   static storeTokens(tokens: TokenSet): void {
     try {
       const tokenData = JSON.stringify(tokens);
       SecureStorage.setItem(TOKEN_STORAGE_KEY, tokenData);
+
+      // Also store in cookie for middleware access
+      if (typeof document !== "undefined") {
+        // Set cookie with same expiration as tokens (30 days max for refresh token)
+        const expires = new Date(tokens.expiresAt + 30 * 24 * 60 * 60 * 1000); // 30 days from token expiry
+        document.cookie = `griot_tokens=${encodeURIComponent(
+          tokenData
+        )}; expires=${expires.toUTCString()}; path=/; secure; samesite=strict`;
+      }
     } catch (error) {
       console.error("Failed to store tokens:", error);
       const authError: AuthError = {
@@ -251,10 +260,16 @@ export class TokenManager {
   }
 
   /**
-   * Clear stored tokens
+   * Clear stored tokens from both localStorage and cookies
    */
   static clearTokens(): void {
     SecureStorage.removeItem(TOKEN_STORAGE_KEY);
+
+    // Also clear cookie
+    if (typeof document !== "undefined") {
+      document.cookie =
+        "griot_tokens=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+    }
   }
 
   /**

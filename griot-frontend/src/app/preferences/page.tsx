@@ -6,6 +6,7 @@ import { UserPreferences } from "../../types/api";
 import { useAuthInternal } from "../../hooks/useAuth";
 import { usePreferencesFlow } from "../../hooks/usePreferencesFlow";
 import { PreferencesApiService } from "../../lib/preferences-api";
+import { MainLayout } from "@/components/layout";
 
 export default function PreferencesPage() {
   const [isLoading, setIsLoading] = useState(false);
@@ -77,7 +78,7 @@ export default function PreferencesPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <MainLayout>
       <div className="py-12">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-gray-900 mb-4">
@@ -109,6 +110,6 @@ export default function PreferencesPage() {
           </div>
         )}
       </div>
-    </div>
+    </MainLayout>
   );
 }

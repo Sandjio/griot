@@ -13,6 +13,60 @@ const publicRoutes = ["/callback", "/logout"];
 // Routes that require preferences to be completed
 const preferencesRequiredRoutes = ["/dashboard", "/profile", "/settings"];
 
+/**
+ * Check if user has valid authentication tokens
+ * This is a server-side check using cookies for middleware access
+ */
+function hasValidTokens(request: NextRequest): boolean {
+  const tokensCookie = request.cookies.get("griot_tokens");
+
+  if (!tokensCookie) {
+    return false;
+  }
+
+  try {
+    // Simple validation - check if tokens exist and are not expired
+    // Note: This is basic validation for middleware. Full validation happens client-side
+    const tokensData = JSON.parse(decodeURIComponent(tokensCookie.value));
+
+    if (
+      !tokensData.accessToken ||
+      !tokensData.idToken ||
+      !tokensData.refreshToken
+    ) {
+      return false;
+    }
+
+    // Check if tokens are expired (with 5-minute buffer)
+    const now = Date.now();
+    const buffer = 5 * 60 * 1000; // 5 minutes
+
+    return tokensData.expiresAt > now + buffer;
+  } catch (error) {
+    // If parsing fails, consider tokens invalid
+    return false;
+  }
+}
+
+/**
+ * Get user data from cookies for server-side access
+ */
+function getUserFromCookies(
+  request: NextRequest
+): { hasPreferences: boolean } | null {
+  const userDataCookie = request.cookies.get("griot_user");
+
+  if (!userDataCookie) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(decodeURIComponent(userDataCookie.value));
+  } catch (error) {
+    return null;
+  }
+}
+
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
@@ -26,61 +80,57 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Check if user has authentication tokens
-  const hasTokens =
-    request.cookies.has("griot_tokens") ||
-    (typeof window !== "undefined" && localStorage.getItem("griot_tokens"));
+  // Check authentication status using improved token validation
+  const isAuthenticated = hasValidTokens(request);
+  const userData = getUserFromCookies(request);
 
   // For protected routes, redirect to login if not authenticated
   if (protectedRoutes.some((route) => pathname.startsWith(route))) {
-    if (!hasTokens) {
+    if (!isAuthenticated) {
       const loginUrl = new URL("/", request.url);
       loginUrl.searchParams.set("returnUrl", pathname);
       return NextResponse.redirect(loginUrl);
     }
 
-    // For routes that require preferences, provide basic server-side protection
-    // The detailed preferences flow logic is handled by the usePreferencesFlow hook
-    // on the client side for more accurate state management
+    // For routes that require preferences, check user preferences status
     if (preferencesRequiredRoutes.some((route) => pathname.startsWith(route))) {
-      // Try to get user preferences status from cookies if available
-      const userDataCookie = request.cookies.get("griot_user");
-      if (userDataCookie) {
-        try {
-          const userData = JSON.parse(userDataCookie.value);
-          // Basic server-side check: if user clearly doesn't have preferences
-          // and is trying to access dashboard, redirect to preferences
-          if (!userData.hasPreferences && pathname.startsWith("/dashboard")) {
-            return NextResponse.redirect(new URL("/preferences", request.url));
-          }
-        } catch (error) {
-          // If cookie parsing fails, let client-side logic handle it
-          console.warn("Failed to parse user data cookie:", error);
+      if (userData) {
+        // If user clearly doesn't have preferences and is trying to access dashboard
+        if (!userData.hasPreferences && pathname.startsWith("/dashboard")) {
+          return NextResponse.redirect(new URL("/preferences", request.url));
         }
       }
-      // For other cases, let client-side usePreferencesFlow hook handle the logic
-      // This allows for more sophisticated state management and API verification
+      // If no user data available, let client-side logic handle the flow
+      // This ensures proper API verification of preferences status
     }
   }
 
-  // For auth routes, redirect to appropriate page if authenticated
-  if (authRoutes.includes(pathname) && hasTokens) {
-    // Try to determine where to redirect based on user preferences
-    const userDataCookie = request.cookies.get("griot_user");
-    if (userDataCookie) {
-      try {
-        const userData = JSON.parse(userDataCookie.value);
-        const redirectUrl = userData.hasPreferences
-          ? "/dashboard"
-          : "/preferences";
-        return NextResponse.redirect(new URL(redirectUrl, request.url));
-      } catch (error) {
-        // If cookie parsing fails, default to dashboard
-        console.warn("Failed to parse user data cookie:", error);
-      }
+  // For auth routes, redirect authenticated users to appropriate page
+  if (authRoutes.includes(pathname) && isAuthenticated) {
+    if (userData) {
+      const redirectUrl = userData.hasPreferences
+        ? "/dashboard"
+        : "/preferences";
+      return NextResponse.redirect(new URL(redirectUrl, request.url));
     }
     // Default redirect to dashboard if no user data available
     return NextResponse.redirect(new URL("/dashboard", request.url));
+  }
+
+  // Handle callback route - allow access regardless of authentication status
+  if (pathname === "/callback") {
+    return NextResponse.next();
+  }
+
+  // Handle logout route - allow access and clear cookies
+  if (pathname === "/logout") {
+    const response = NextResponse.next();
+
+    // Clear authentication cookies
+    response.cookies.delete("griot_tokens");
+    response.cookies.delete("griot_user");
+
+    return response;
   }
 
   return NextResponse.next();

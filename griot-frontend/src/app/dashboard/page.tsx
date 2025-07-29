@@ -3,10 +3,11 @@
 import { useAuth } from "@/hooks/useAuth";
 import { usePreferencesFlow } from "@/hooks/usePreferencesFlow";
 import { useMangaGeneration } from "@/hooks/useMangaGeneration";
+import { MainLayout } from "@/components/layout";
 import { MangaCategory } from "@/types/api";
 
 export default function DashboardPage() {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const { needsPreferences } = usePreferencesFlow();
   const {
     isGenerating,
@@ -29,66 +30,40 @@ export default function DashboardPage() {
   // If user needs preferences, the usePreferencesFlow hook will handle redirection
   if (needsPreferences) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Redirecting to preferences...</p>
+      <MainLayout>
+        <div className="min-h-screen flex items-center justify-center">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600 mx-auto mb-4"></div>
+            <p className="text-gray-600">Redirecting to preferences...</p>
+          </div>
         </div>
-      </div>
+      </MainLayout>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header with enhanced user profile section */}
-      <header className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center py-4 sm:py-0 sm:h-16">
-            <div className="flex items-center mb-4 sm:mb-0">
-              <div className="flex items-center space-x-3">
-                <div className="w-8 h-8 bg-gradient-to-r from-purple-600 to-blue-600 rounded-full flex items-center justify-center">
-                  <span className="text-white text-sm font-semibold">
-                    {(user?.username || user?.email || "U")
-                      .charAt(0)
-                      .toUpperCase()}
-                  </span>
-                </div>
-                <div>
-                  <h1 className="text-xl font-semibold text-gray-900">
-                    Griot Dashboard
-                  </h1>
-                  <p className="text-sm text-gray-500 hidden sm:block">
-                    Create amazing manga stories
-                  </p>
-                </div>
-              </div>
+    <MainLayout>
+      {/* Page Header */}
+      <div className="bg-white shadow-sm border-b">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          <div className="flex items-center space-x-3">
+            <div className="w-10 h-10 bg-gradient-to-r from-purple-600 to-blue-600 rounded-full flex items-center justify-center">
+              <span className="text-white text-lg font-semibold">
+                {(user?.username || user?.email || "U").charAt(0).toUpperCase()}
+              </span>
             </div>
-            <div className="flex items-center justify-between sm:justify-end space-x-4">
-              <div className="flex items-center space-x-3">
-                <div className="hidden md:block">
-                  <span className="text-sm text-gray-600">Welcome back,</span>
-                  <span className="text-sm font-medium text-gray-900 ml-1">
-                    {user?.username || user?.email?.split("@")[0] || "User"}
-                  </span>
-                </div>
-                <div className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center md:hidden">
-                  <span className="text-gray-600 text-sm font-medium">
-                    {(user?.username || user?.email || "U")
-                      .charAt(0)
-                      .toUpperCase()}
-                  </span>
-                </div>
-              </div>
-              <button
-                onClick={logout}
-                className="text-sm text-gray-500 hover:text-gray-700 transition-colors px-3 py-1 rounded-md hover:bg-gray-100"
-              >
-                Logout
-              </button>
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">
+                Welcome back,{" "}
+                {user?.username || user?.email?.split("@")[0] || "User"}!
+              </h1>
+              <p className="text-gray-600">
+                Create amazing manga stories tailored to your preferences
+              </p>
             </div>
           </div>
         </div>
-      </header>
+      </div>
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -603,6 +578,6 @@ export default function DashboardPage() {
           </button>
         </div>
       </main>
-    </div>
+    </MainLayout>
   );
 }
