@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AuthUtils, UserManager } from "@/lib/auth";
 import { AuthError, AuthErrorType } from "@/types/auth";
 import { apiService } from "@/lib/api";
+import { usePreferencesFlow } from "@/hooks/usePreferencesFlow";
 
 interface CallbackState {
   status: "loading" | "success" | "error";
@@ -73,10 +74,11 @@ const ErrorContextDisplay: React.FC<{
   );
 };
 
-export default function CallbackPage() {
+function CallbackPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [state, setState] = useState<CallbackState>({ status: "loading" });
+  const { handleAuthenticationComplete } = usePreferencesFlow();
 
   useEffect(() => {
     const handleCallback = async () => {
@@ -187,13 +189,8 @@ export default function CallbackPage() {
             message: "Authentication successful! Redirecting...",
           });
 
-          // Determine where to redirect based on user preferences
-          const redirectPath = hasPreferences ? "/dashboard" : "/preferences";
-
-          // Small delay to show success message
-          setTimeout(() => {
-            router.replace(redirectPath);
-          }, 1500);
+          // Use preferences flow hook to handle redirection
+          handleAuthenticationComplete({ hasPreferences });
         } else {
           // Categorize the error for better user feedback
           const authError = result.error || {
@@ -267,7 +264,7 @@ export default function CallbackPage() {
           authError = {
             type: AuthErrorType.VALIDATION_ERROR,
             message: "An unexpected error occurred during authentication",
-            details: error,
+            details: error instanceof Error ? error : String(error),
             recoverable: false,
           };
         }
@@ -281,7 +278,7 @@ export default function CallbackPage() {
     };
 
     handleCallback();
-  }, [searchParams, router]);
+  }, [searchParams, router, handleAuthenticationComplete]);
 
   const handleRetry = () => {
     setState({ status: "loading" });
@@ -417,5 +414,28 @@ export default function CallbackPage() {
         </div>
       </div>
     </div>
+  );
+}
+export default function CallbackPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-purple-50 to-blue-50">
+          <div className="max-w-md w-full mx-4">
+            <div className="bg-white rounded-lg shadow-lg p-8 text-center">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto mb-4"></div>
+              <h2 className="text-xl font-semibold text-gray-900 mb-2">
+                Loading...
+              </h2>
+              <p className="text-gray-600">
+                Please wait while we prepare the authentication page.
+              </p>
+            </div>
+          </div>
+        </div>
+      }
+    >
+      <CallbackPageContent />
+    </Suspense>
   );
 }

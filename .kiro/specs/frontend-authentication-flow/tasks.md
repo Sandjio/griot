@@ -76,21 +76,21 @@
 
 - [ ] 6. Build user preferences collection system
 
-  - [ ] 6.1 Create preferences form component
+  - [x] 6.1 Create preferences form component
 
     - Design multi-step form with manga preference options (genres, themes, art style)
     - Implement form validation with real-time feedback
     - Add progress indicators and navigation between form steps
     - _Requirements: 4.1, 4.2, 4.5_
 
-  - [ ] 6.2 Implement preferences API integration
+  - [x] 6.2 Implement preferences API integration
 
-    - Create API service for POST /preferences endpoint
-    - Add form submission handling with loading states
-    - Implement error handling and retry functionality for failed submissions
-    - _Requirements: 4.3, 4.4, 4.5_
+  - Create API service for POST /preferences endpoint
+  - Add form submission handling with loading states
+  - Implement error handling and retry functionality for failed submissions
+  - _Requirements: 4.3, 4.4, 4.5_
 
-  - [ ] 6.3 Add preferences flow routing logic
+  - [x] 6.3 Add preferences flow routing logic
     - Implement logic to redirect new users to preferences page
     - Create logic to skip preferences for returning users
     - Add navigation to dashboard after successful preferences submission

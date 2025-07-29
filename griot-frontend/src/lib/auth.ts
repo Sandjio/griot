@@ -117,7 +117,7 @@ export class TokenManager {
       const authError: AuthError = {
         type: AuthErrorType.VALIDATION_ERROR,
         message: "Failed to store authentication tokens",
-        details: error,
+        details: error instanceof Error ? error : String(error),
         recoverable: false,
       };
       throw authError;
@@ -243,7 +243,7 @@ export class TokenManager {
       const authError: AuthError = {
         type: AuthErrorType.NETWORK_ERROR,
         message: "Network error during token refresh",
-        details: error,
+        details: error instanceof Error ? error : String(error),
         recoverable: true,
       };
       throw authError;
@@ -274,12 +274,22 @@ export class TokenManager {
  */
 export class UserManager {
   /**
-   * Store user data
+   * Store user data in both localStorage and cookies
    */
   static storeUser(user: User): void {
     try {
       const userData = JSON.stringify(user);
       SecureStorage.setItem(USER_STORAGE_KEY, userData);
+
+      // Also store in cookie for middleware access
+      if (typeof document !== "undefined") {
+        // Set cookie with 30 day expiration (same as refresh token)
+        const expires = new Date();
+        expires.setDate(expires.getDate() + 30);
+        document.cookie = `griot_user=${encodeURIComponent(
+          userData
+        )}; expires=${expires.toUTCString()}; path=/; secure; samesite=strict`;
+      }
     } catch (error) {
       console.error("Failed to store user data:", error);
     }
@@ -302,10 +312,16 @@ export class UserManager {
   }
 
   /**
-   * Clear stored user data
+   * Clear stored user data from both localStorage and cookies
    */
   static clearUser(): void {
     SecureStorage.removeItem(USER_STORAGE_KEY);
+
+    // Also clear cookie
+    if (typeof document !== "undefined") {
+      document.cookie =
+        "griot_user=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+    }
   }
 
   /**
@@ -488,7 +504,7 @@ export class CognitoOAuth {
       const authError: AuthError = {
         type: AuthErrorType.NETWORK_ERROR,
         message: "Network error during token exchange",
-        details: error,
+        details: error instanceof Error ? error : String(error),
         recoverable: true,
       };
       throw authError;
@@ -632,7 +648,7 @@ export class AuthUtils {
         const authError: AuthError = {
           type: AuthErrorType.VALIDATION_ERROR,
           message: "Failed to extract user information from tokens",
-          details: null,
+          details: undefined,
           recoverable: false,
         };
         throw authError;
@@ -658,7 +674,7 @@ export class AuthUtils {
             : {
                 type: AuthErrorType.VALIDATION_ERROR,
                 message: "Unexpected error during callback handling",
-                details: error,
+                details: error instanceof Error ? error : String(error),
                 recoverable: false,
               },
       };

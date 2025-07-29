@@ -94,6 +94,6 @@ export enum AuthErrorType {
 export interface AuthError {
   type: AuthErrorType;
   message: string;
-  details?: unknown;
+  details?: Record<string, unknown> | Error | string;
   recoverable: boolean;
 }
