@@ -2,10 +2,29 @@
 
 import { useAuth } from "@/hooks/useAuth";
 import { usePreferencesFlow } from "@/hooks/usePreferencesFlow";
+import { useMangaGeneration } from "@/hooks/useMangaGeneration";
+import { MangaCategory } from "@/types/api";
 
 export default function DashboardPage() {
   const { user, logout } = useAuth();
   const { needsPreferences } = usePreferencesFlow();
+  const {
+    isGenerating,
+    currentGeneration,
+    progress,
+    currentStep,
+    error,
+    generateManga,
+    cancelGeneration,
+    clearError,
+    retry,
+  } = useMangaGeneration();
+
+  // Handle category selection and generation
+  const handleGenerateCategory = async (category: MangaCategory) => {
+    clearError(); // Clear any previous errors
+    await generateManga(category);
+  };
 
   // If user needs preferences, the usePreferencesFlow hook will handle redirection
   if (needsPreferences) {
@@ -21,22 +40,48 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
+      {/* Header with enhanced user profile section */}
       <header className="bg-white shadow-sm border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            <div className="flex items-center">
-              <h1 className="text-xl font-semibold text-gray-900">
-                Griot Dashboard
-              </h1>
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center py-4 sm:py-0 sm:h-16">
+            <div className="flex items-center mb-4 sm:mb-0">
+              <div className="flex items-center space-x-3">
+                <div className="w-8 h-8 bg-gradient-to-r from-purple-600 to-blue-600 rounded-full flex items-center justify-center">
+                  <span className="text-white text-sm font-semibold">
+                    {(user?.username || user?.email || "U")
+                      .charAt(0)
+                      .toUpperCase()}
+                  </span>
+                </div>
+                <div>
+                  <h1 className="text-xl font-semibold text-gray-900">
+                    Griot Dashboard
+                  </h1>
+                  <p className="text-sm text-gray-500 hidden sm:block">
+                    Create amazing manga stories
+                  </p>
+                </div>
+              </div>
             </div>
-            <div className="flex items-center space-x-4">
-              <span className="text-sm text-gray-600">
-                Welcome, {user?.username || user?.email}
-              </span>
+            <div className="flex items-center justify-between sm:justify-end space-x-4">
+              <div className="flex items-center space-x-3">
+                <div className="hidden md:block">
+                  <span className="text-sm text-gray-600">Welcome back,</span>
+                  <span className="text-sm font-medium text-gray-900 ml-1">
+                    {user?.username || user?.email?.split("@")[0] || "User"}
+                  </span>
+                </div>
+                <div className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center md:hidden">
+                  <span className="text-gray-600 text-sm font-medium">
+                    {(user?.username || user?.email || "U")
+                      .charAt(0)
+                      .toUpperCase()}
+                  </span>
+                </div>
+              </div>
               <button
                 onClick={logout}
-                className="text-sm text-gray-500 hover:text-gray-700 transition-colors"
+                className="text-sm text-gray-500 hover:text-gray-700 transition-colors px-3 py-1 rounded-md hover:bg-gray-100"
               >
                 Logout
               </button>
@@ -57,8 +102,79 @@ export default function DashboardPage() {
           </p>
         </div>
 
+        {/* Generation Progress Display */}
+        {isGenerating && (
+          <div className="mb-8 bg-white rounded-lg shadow-md p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">
+                Generating Your Manga...
+              </h3>
+              <button
+                onClick={cancelGeneration}
+                className="text-sm text-red-600 hover:text-red-700 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+
+            <div className="mb-4">
+              <div className="flex justify-between text-sm text-gray-600 mb-2">
+                <span>{currentStep}</span>
+                <span>{progress}%</span>
+              </div>
+              <div className="w-full bg-gray-200 rounded-full h-2">
+                <div
+                  className="bg-gradient-to-r from-purple-600 to-blue-600 h-2 rounded-full transition-all duration-300"
+                  style={{ width: `${progress}%` }}
+                ></div>
+              </div>
+            </div>
+
+            <div className="flex items-center space-x-2 text-sm text-gray-500">
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-purple-600"></div>
+              <span>This may take a few minutes...</span>
+            </div>
+          </div>
+        )}
+
+        {/* Error Display */}
+        {error && !isGenerating && (
+          <div className="mb-8 bg-red-50 border border-red-200 rounded-lg p-6">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-lg font-semibold text-red-800">
+                Generation Failed
+              </h3>
+              <button
+                onClick={clearError}
+                className="text-red-600 hover:text-red-700"
+              >
+                <svg
+                  className="w-5 h-5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M6 18L18 6M6 6l12 12"
+                  />
+                </svg>
+              </button>
+            </div>
+            <p className="text-red-700 mb-4">{error}</p>
+            <button
+              onClick={retry}
+              className="bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700 transition-colors"
+            >
+              Try Again
+            </button>
+          </div>
+        )}
+
         {/* Manga Generation Categories */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
           {/* Adventure Category */}
           <div className="bg-white rounded-lg shadow-md p-6 hover:shadow-lg transition-shadow">
             <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mb-4">
@@ -82,8 +198,19 @@ export default function DashboardPage() {
             <p className="text-gray-600 mb-4">
               Epic journeys, heroic quests, and thrilling adventures await.
             </p>
-            <button className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 transition-colors">
-              Generate Adventure Story
+            <button
+              onClick={() => handleGenerateCategory("Adventure")}
+              disabled={isGenerating}
+              className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center justify-center"
+            >
+              {isGenerating ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                  Generating...
+                </>
+              ) : (
+                "Generate Adventure Story"
+              )}
             </button>
           </div>
 
@@ -110,8 +237,19 @@ export default function DashboardPage() {
             <p className="text-gray-600 mb-4">
               Heartwarming love stories and romantic adventures.
             </p>
-            <button className="w-full bg-pink-600 text-white py-2 px-4 rounded-md hover:bg-pink-700 transition-colors">
-              Generate Romance Story
+            <button
+              onClick={() => handleGenerateCategory("Romance")}
+              disabled={isGenerating}
+              className="w-full bg-pink-600 text-white py-2 px-4 rounded-md hover:bg-pink-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center justify-center"
+            >
+              {isGenerating ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                  Generating...
+                </>
+              ) : (
+                "Generate Romance Story"
+              )}
             </button>
           </div>
 
@@ -138,8 +276,19 @@ export default function DashboardPage() {
             <p className="text-gray-600 mb-4">
               Magical worlds, mythical creatures, and supernatural powers.
             </p>
-            <button className="w-full bg-purple-600 text-white py-2 px-4 rounded-md hover:bg-purple-700 transition-colors">
-              Generate Fantasy Story
+            <button
+              onClick={() => handleGenerateCategory("Fantasy")}
+              disabled={isGenerating}
+              className="w-full bg-purple-600 text-white py-2 px-4 rounded-md hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center justify-center"
+            >
+              {isGenerating ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                  Generating...
+                </>
+              ) : (
+                "Generate Fantasy Story"
+              )}
             </button>
           </div>
 
@@ -164,8 +313,19 @@ export default function DashboardPage() {
             <p className="text-gray-600 mb-4">
               Futuristic technology, space exploration, and scientific wonders.
             </p>
-            <button className="w-full bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 transition-colors">
-              Generate Sci-Fi Story
+            <button
+              onClick={() => handleGenerateCategory("Sci-Fi")}
+              disabled={isGenerating}
+              className="w-full bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center justify-center"
+            >
+              {isGenerating ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                  Generating...
+                </>
+              ) : (
+                "Generate Sci-Fi Story"
+              )}
             </button>
           </div>
 
@@ -193,8 +353,19 @@ export default function DashboardPage() {
               Intriguing puzzles, detective work, and suspenseful
               investigations.
             </p>
-            <button className="w-full bg-gray-600 text-white py-2 px-4 rounded-md hover:bg-gray-700 transition-colors">
-              Generate Mystery Story
+            <button
+              onClick={() => handleGenerateCategory("Mystery")}
+              disabled={isGenerating}
+              className="w-full bg-gray-600 text-white py-2 px-4 rounded-md hover:bg-gray-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center justify-center"
+            >
+              {isGenerating ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                  Generating...
+                </>
+              ) : (
+                "Generate Mystery Story"
+              )}
             </button>
           </div>
 
@@ -219,11 +390,204 @@ export default function DashboardPage() {
             <p className="text-gray-600 mb-4">
               Spine-chilling tales, supernatural encounters, and dark mysteries.
             </p>
-            <button className="w-full bg-red-600 text-white py-2 px-4 rounded-md hover:bg-red-700 transition-colors">
-              Generate Horror Story
+            <button
+              onClick={() => handleGenerateCategory("Horror")}
+              disabled={isGenerating}
+              className="w-full bg-red-600 text-white py-2 px-4 rounded-md hover:bg-red-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center justify-center"
+            >
+              {isGenerating ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                  Generating...
+                </>
+              ) : (
+                "Generate Horror Story"
+              )}
             </button>
           </div>
         </div>
+
+        {/* Generated Content Display */}
+        {currentGeneration &&
+          currentGeneration.status === "completed" &&
+          currentGeneration.story && (
+            <div className="mt-12 bg-white rounded-lg shadow-md overflow-hidden">
+              <div className="bg-gradient-to-r from-purple-600 to-blue-600 px-6 py-4">
+                <h3 className="text-xl font-semibold text-white">
+                  Your Generated Manga: {currentGeneration.story.title}
+                </h3>
+                <p className="text-purple-100 mt-1">
+                  Category: {currentGeneration.category}
+                </p>
+              </div>
+
+              <div className="p-6">
+                {/* Synopsis */}
+                <div className="mb-6">
+                  <h4 className="text-lg font-semibold text-gray-900 mb-2">
+                    Synopsis
+                  </h4>
+                  <p className="text-gray-700 leading-relaxed">
+                    {currentGeneration.story.synopsis}
+                  </p>
+                </div>
+
+                {/* Chapters */}
+                <div className="space-y-6">
+                  <h4 className="text-lg font-semibold text-gray-900">
+                    Chapters
+                  </h4>
+                  {currentGeneration.story.chapters.map((chapter, index) => (
+                    <div
+                      key={index}
+                      className="border-l-4 border-purple-500 pl-4"
+                    >
+                      <h5 className="text-md font-semibold text-gray-800 mb-2">
+                        Chapter {index + 1}: {chapter.title}
+                      </h5>
+
+                      {/* Chapter Image */}
+                      {chapter.imageUrl && (
+                        <div className="mb-4">
+                          <img
+                            src={chapter.imageUrl}
+                            alt={`Chapter ${index + 1} illustration`}
+                            className="w-full max-w-md rounded-lg shadow-md"
+                            onError={(e) => {
+                              const target = e.target as HTMLImageElement;
+                              target.style.display = "none";
+                            }}
+                          />
+                        </div>
+                      )}
+
+                      {/* Chapter Content */}
+                      <div className="prose prose-gray max-w-none">
+                        {chapter.content.split("\n").map(
+                          (paragraph, pIndex) =>
+                            paragraph.trim() && (
+                              <p
+                                key={pIndex}
+                                className="text-gray-700 mb-3 leading-relaxed"
+                              >
+                                {paragraph.trim()}
+                              </p>
+                            )
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Additional Images */}
+                {currentGeneration.images &&
+                  currentGeneration.images.length > 0 && (
+                    <div className="mt-8">
+                      <h4 className="text-lg font-semibold text-gray-900 mb-4">
+                        Gallery
+                      </h4>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {currentGeneration.images.map((image) => (
+                          <div key={image.id} className="relative group">
+                            <img
+                              src={image.url}
+                              alt={image.description}
+                              className="w-full h-48 object-cover rounded-lg shadow-md group-hover:shadow-lg transition-shadow"
+                              onError={(e) => {
+                                const target = e.target as HTMLImageElement;
+                                target.parentElement?.remove();
+                              }}
+                            />
+                            <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 transition-opacity rounded-lg"></div>
+                            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black to-transparent p-3 rounded-b-lg opacity-0 group-hover:opacity-100 transition-opacity">
+                              <p className="text-white text-sm">
+                                {image.description}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                {/* Action Buttons */}
+                <div className="mt-8 flex flex-wrap gap-3">
+                  <button
+                    onClick={() => window.print()}
+                    className="bg-gray-100 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-200 transition-colors flex items-center"
+                  >
+                    <svg
+                      className="w-4 h-4 mr-2"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"
+                      />
+                    </svg>
+                    Print Story
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      const storyText = `${currentGeneration.story!.title}\n\n${
+                        currentGeneration.story!.synopsis
+                      }\n\n${currentGeneration
+                        .story!.chapters.map(
+                          (ch, i) =>
+                            `Chapter ${i + 1}: ${ch.title}\n\n${ch.content}`
+                        )
+                        .join("\n\n")}`;
+                      navigator.clipboard.writeText(storyText);
+                    }}
+                    className="bg-blue-100 text-blue-700 px-4 py-2 rounded-md hover:bg-blue-200 transition-colors flex items-center"
+                  >
+                    <svg
+                      className="w-4 h-4 mr-2"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                      />
+                    </svg>
+                    Copy Text
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      // Reset the generation state to allow new generation
+                      window.location.reload();
+                    }}
+                    className="bg-purple-100 text-purple-700 px-4 py-2 rounded-md hover:bg-purple-200 transition-colors flex items-center"
+                  >
+                    <svg
+                      className="w-4 h-4 mr-2"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M12 4v16m8-8H4"
+                      />
+                    </svg>
+                    Generate New Story
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
         {/* User Preferences Summary */}
         <div className="mt-12 bg-white rounded-lg shadow-md p-6">

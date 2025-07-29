@@ -70,6 +70,53 @@ export interface UserPreferences {
   contentRating: ContentRating;
 }
 
+// Manga Generation Types
+export type MangaCategory =
+  | "Adventure"
+  | "Romance"
+  | "Fantasy"
+  | "Sci-Fi"
+  | "Mystery"
+  | "Horror";
+
+export interface MangaGenerationRequest {
+  category: MangaCategory;
+  preferences?: UserPreferences;
+}
+
+export interface MangaGenerationResponse {
+  id: string;
+  status: "pending" | "processing" | "completed" | "failed";
+  category: MangaCategory;
+  story?: {
+    title: string;
+    synopsis: string;
+    chapters: Array<{
+      title: string;
+      content: string;
+      imageUrl?: string;
+    }>;
+  };
+  images?: Array<{
+    id: string;
+    url: string;
+    description: string;
+    chapterIndex: number;
+  }>;
+  createdAt: string;
+  completedAt?: string;
+  error?: string;
+}
+
+export interface MangaGenerationStatus {
+  id: string;
+  status: "pending" | "processing" | "completed" | "failed";
+  progress: number; // 0-100
+  currentStep: string;
+  estimatedTimeRemaining?: number; // in seconds
+  error?: string;
+}
+
 // Environment Configuration
 export interface EnvironmentConfig {
   NEXT_PUBLIC_COGNITO_USER_POOL_ID: string;
