@@ -10,6 +10,8 @@ import { docClient, TABLE_NAME } from "./dynamodb-client";
 import {
   UserProfile,
   UserPreferences,
+  UserPreferencesData,
+  QlooInsights,
   Story,
   Episode,
   GenerationRequest,
@@ -137,6 +139,43 @@ export class UserPreferencesAccess {
 
     const result = await docClient.send(command);
     return (result.Items?.[0] as UserPreferences) || null;
+  }
+
+  static async getLatestWithMetadata(userId: string): Promise<{
+    preferences: UserPreferencesData | null;
+    insights?: QlooInsights;
+    lastUpdated?: string;
+  }> {
+    try {
+      const command = new QueryCommand({
+        TableName: TABLE_NAME,
+        KeyConditionExpression: "PK = :pk AND begins_with(SK, :sk)",
+        ExpressionAttributeValues: {
+          ":pk": `USER#${userId}`,
+          ":sk": "PREFERENCES#",
+        },
+        ScanIndexForward: false,
+        Limit: 1,
+      });
+
+      const result = await docClient.send(command);
+      const latestPreference = result.Items?.[0] as UserPreferences;
+
+      if (!latestPreference) {
+        return {
+          preferences: null,
+        };
+      }
+
+      return {
+        preferences: latestPreference.preferences,
+        insights: latestPreference.insights,
+        lastUpdated: latestPreference.createdAt,
+      };
+    } catch (error) {
+      console.error("Error retrieving user preferences with metadata:", error);
+      throw new Error("Failed to retrieve user preferences");
+    }
   }
 
   static async getHistory(

@@ -108,6 +108,225 @@ describe("DynamoDB Access Patterns", () => {
     });
   });
 
+  describe("UserPreferencesAccess", () => {
+    it("should create user preferences with correct keys", async () => {
+      ddbMock.on(PutCommand).resolves({});
+
+      const preferences = {
+        preferences: {
+          genres: ["action", "adventure"],
+          themes: ["friendship", "courage"],
+          artStyle: "manga",
+          targetAudience: "teen",
+          contentRating: "PG-13",
+        },
+        insights: {
+          recommendations: [
+            {
+              category: "genre",
+              score: 0.9,
+              attributes: { popularity: "high" },
+            },
+          ],
+          trends: [
+            {
+              topic: "action",
+              popularity: 0.8,
+            },
+          ],
+        },
+      };
+
+      await UserPreferencesAccess.create("user-123", preferences);
+
+      expect(ddbMock.commandCalls(PutCommand)).toHaveLength(1);
+      const putCall = ddbMock.commandCalls(PutCommand)[0];
+      expect(putCall.args[0].input).toMatchObject({
+        Item: expect.objectContaining({
+          PK: "USER#user-123",
+          SK: expect.stringMatching(
+            /^PREFERENCES#\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
+          ),
+          GSI1PK: "USER#user-123",
+          GSI1SK: expect.stringMatching(
+            /^PREFERENCES#\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
+          ),
+          preferences: preferences.preferences,
+          insights: preferences.insights,
+          createdAt: expect.any(String),
+        }),
+      });
+    });
+
+    it("should get latest user preferences", async () => {
+      const mockPreferences = {
+        PK: "USER#user-123",
+        SK: "PREFERENCES#2024-01-01T00:00:00.000Z",
+        GSI1PK: "USER#user-123",
+        GSI1SK: "PREFERENCES#2024-01-01T00:00:00.000Z",
+        preferences: {
+          genres: ["action", "adventure"],
+          themes: ["friendship", "courage"],
+          artStyle: "manga",
+          targetAudience: "teen",
+          contentRating: "PG-13",
+        },
+        insights: {
+          recommendations: [
+            {
+              category: "genre",
+              score: 0.9,
+              attributes: { popularity: "high" },
+            },
+          ],
+          trends: [
+            {
+              topic: "action",
+              popularity: 0.8,
+            },
+          ],
+        },
+        createdAt: "2024-01-01T00:00:00.000Z",
+      };
+
+      ddbMock.on(QueryCommand).resolves({ Items: [mockPreferences] });
+
+      const result = await UserPreferencesAccess.getLatest("user-123");
+
+      expect(result).toEqual(mockPreferences);
+      expect(ddbMock.commandCalls(QueryCommand)).toHaveLength(1);
+      const queryCall = ddbMock.commandCalls(QueryCommand)[0];
+      expect(queryCall.args[0].input).toMatchObject({
+        KeyConditionExpression: "PK = :pk AND begins_with(SK, :sk)",
+        ExpressionAttributeValues: {
+          ":pk": "USER#user-123",
+          ":sk": "PREFERENCES#",
+        },
+        ScanIndexForward: false,
+        Limit: 1,
+      });
+    });
+
+    it("should get latest user preferences with metadata", async () => {
+      const mockPreferences = {
+        PK: "USER#user-123",
+        SK: "PREFERENCES#2024-01-01T00:00:00.000Z",
+        GSI1PK: "USER#user-123",
+        GSI1SK: "PREFERENCES#2024-01-01T00:00:00.000Z",
+        preferences: {
+          genres: ["action", "adventure"],
+          themes: ["friendship", "courage"],
+          artStyle: "manga",
+          targetAudience: "teen",
+          contentRating: "PG-13",
+        },
+        insights: {
+          recommendations: [
+            {
+              category: "genre",
+              score: 0.9,
+              attributes: { popularity: "high" },
+            },
+          ],
+          trends: [
+            {
+              topic: "action",
+              popularity: 0.8,
+            },
+          ],
+        },
+        createdAt: "2024-01-01T00:00:00.000Z",
+      };
+
+      ddbMock.on(QueryCommand).resolves({ Items: [mockPreferences] });
+
+      const result = await UserPreferencesAccess.getLatestWithMetadata(
+        "user-123"
+      );
+
+      expect(result).toEqual({
+        preferences: mockPreferences.preferences,
+        insights: mockPreferences.insights,
+        lastUpdated: mockPreferences.createdAt,
+      });
+      expect(ddbMock.commandCalls(QueryCommand)).toHaveLength(1);
+      const queryCall = ddbMock.commandCalls(QueryCommand)[0];
+      expect(queryCall.args[0].input).toMatchObject({
+        KeyConditionExpression: "PK = :pk AND begins_with(SK, :sk)",
+        ExpressionAttributeValues: {
+          ":pk": "USER#user-123",
+          ":sk": "PREFERENCES#",
+        },
+        ScanIndexForward: false,
+        Limit: 1,
+      });
+    });
+
+    it("should return null preferences when user has no stored preferences", async () => {
+      ddbMock.on(QueryCommand).resolves({ Items: [] });
+
+      const result = await UserPreferencesAccess.getLatestWithMetadata(
+        "user-123"
+      );
+
+      expect(result).toEqual({
+        preferences: null,
+      });
+      expect(ddbMock.commandCalls(QueryCommand)).toHaveLength(1);
+    });
+
+    it("should handle database errors in getLatestWithMetadata", async () => {
+      const consoleErrorSpy = jest
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
+      ddbMock.on(QueryCommand).rejects(new Error("Database connection failed"));
+
+      await expect(
+        UserPreferencesAccess.getLatestWithMetadata("user-123")
+      ).rejects.toThrow("Failed to retrieve user preferences");
+
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        "Error retrieving user preferences with metadata:",
+        expect.any(Error)
+      );
+      consoleErrorSpy.mockRestore();
+    });
+
+    it("should get user preferences history", async () => {
+      const mockPreferencesHistory = [
+        {
+          PK: "USER#user-123",
+          SK: "PREFERENCES#2024-01-02T00:00:00.000Z",
+          preferences: { genres: ["action"] },
+          createdAt: "2024-01-02T00:00:00.000Z",
+        },
+        {
+          PK: "USER#user-123",
+          SK: "PREFERENCES#2024-01-01T00:00:00.000Z",
+          preferences: { genres: ["comedy"] },
+          createdAt: "2024-01-01T00:00:00.000Z",
+        },
+      ];
+
+      ddbMock.on(QueryCommand).resolves({ Items: mockPreferencesHistory });
+
+      const result = await UserPreferencesAccess.getHistory("user-123", 5);
+
+      expect(result).toEqual(mockPreferencesHistory);
+      expect(ddbMock.commandCalls(QueryCommand)).toHaveLength(1);
+      const queryCall = ddbMock.commandCalls(QueryCommand)[0];
+      expect(queryCall.args[0].input).toMatchObject({
+        KeyConditionExpression: "PK = :pk AND begins_with(SK, :sk)",
+        ExpressionAttributeValues: {
+          ":pk": "USER#user-123",
+          ":sk": "PREFERENCES#",
+        },
+        ScanIndexForward: false,
+        Limit: 5,
+      });
+    });
+  });
+
   describe("StoryAccess", () => {
     it("should create a story with correct keys", async () => {
       ddbMock.on(PutCommand).resolves({});
