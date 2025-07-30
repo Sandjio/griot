@@ -1,4 +1,5 @@
 import { APIGatewayProxyResult } from "aws-lambda";
+import { UserPreferencesData, QlooInsights } from "../../types/data-models";
 
 /**
  * Response utilities for consistent API responses
@@ -20,6 +21,25 @@ interface SuccessResponse<T = any> {
   data: T;
   requestId?: string;
   timestamp: string;
+}
+
+/**
+ * Response data structure for GET preferences endpoint
+ */
+export interface GetPreferencesResponseData {
+  preferences: UserPreferencesData | null;
+  insights?: QlooInsights;
+  lastUpdated?: string;
+  message?: string;
+}
+
+/**
+ * Response data structure for POST preferences endpoint
+ */
+export interface PostPreferencesResponseData {
+  message: string;
+  preferences: UserPreferencesData;
+  insights: QlooInsights;
 }
 
 /**
@@ -99,6 +119,210 @@ export function createOptionsResponse(): APIGatewayProxyResult {
 }
 
 /**
+ * Create a success response for GET preferences endpoint
+ */
+export function createGetPreferencesResponse(
+  preferences: UserPreferencesData | null,
+  insights?: QlooInsights,
+  lastUpdated?: string,
+  requestId?: string
+): APIGatewayProxyResult {
+  const responseData: GetPreferencesResponseData = {
+    preferences,
+    insights,
+    lastUpdated,
+  };
+
+  // Add message for empty preferences case
+  if (!preferences) {
+    responseData.message = "No preferences found for user";
+  }
+
+  return createSuccessResponse(responseData, 200, requestId);
+}
+
+/**
+ * Create a success response for POST preferences endpoint
+ */
+export function createPostPreferencesResponse(
+  preferences: UserPreferencesData,
+  insights: QlooInsights,
+  requestId?: string
+): APIGatewayProxyResult {
+  const responseData: PostPreferencesResponseData = {
+    message: "Preferences saved successfully",
+    preferences,
+    insights,
+  };
+
+  return createSuccessResponse(responseData, 200, requestId);
+}
+
+/**
+ * Create an empty preferences response for GET endpoint when user has no stored preferences
+ */
+export function createEmptyPreferencesResponse(
+  requestId?: string
+): APIGatewayProxyResult {
+  const responseData: GetPreferencesResponseData = {
+    preferences: null,
+    message: "No preferences found for user",
+  };
+
+  return createSuccessResponse(responseData, 200, requestId);
+}
+
+/**
+ * Create an error response for authentication failures
+ */
+export function createUnauthorizedResponse(
+  requestId?: string
+): APIGatewayProxyResult {
+  return createErrorResponse(
+    HttpStatusCodes.UNAUTHORIZED,
+    ErrorCodes.UNAUTHORIZED,
+    "User not authenticated",
+    requestId
+  );
+}
+
+/**
+ * Create an error response for validation failures
+ */
+export function createValidationErrorResponse(
+  message: string,
+  requestId?: string
+): APIGatewayProxyResult {
+  return createErrorResponse(
+    HttpStatusCodes.BAD_REQUEST,
+    ErrorCodes.VALIDATION_ERROR,
+    message,
+    requestId
+  );
+}
+
+/**
+ * Create an error response for invalid JSON
+ */
+export function createInvalidJsonResponse(
+  requestId?: string
+): APIGatewayProxyResult {
+  return createErrorResponse(
+    HttpStatusCodes.BAD_REQUEST,
+    ErrorCodes.INVALID_JSON,
+    "Invalid JSON in request body",
+    requestId
+  );
+}
+
+/**
+ * Create an error response for missing request body
+ */
+export function createMissingBodyResponse(
+  requestId?: string
+): APIGatewayProxyResult {
+  return createErrorResponse(
+    HttpStatusCodes.BAD_REQUEST,
+    ErrorCodes.INVALID_REQUEST,
+    "Request body is required",
+    requestId
+  );
+}
+
+/**
+ * Create an error response for preferences retrieval failures
+ */
+export function createPreferencesRetrievalErrorResponse(
+  requestId?: string
+): APIGatewayProxyResult {
+  return createErrorResponse(
+    HttpStatusCodes.INTERNAL_SERVER_ERROR,
+    ErrorCodes.PREFERENCES_RETRIEVAL_ERROR,
+    "Failed to retrieve preferences. Please try again later.",
+    requestId
+  );
+}
+
+/**
+ * Create an error response for preferences storage failures
+ */
+export function createPreferencesStorageErrorResponse(
+  requestId?: string
+): APIGatewayProxyResult {
+  return createErrorResponse(
+    HttpStatusCodes.INTERNAL_SERVER_ERROR,
+    ErrorCodes.PREFERENCES_STORAGE_ERROR,
+    "Failed to save preferences. Please try again later.",
+    requestId
+  );
+}
+
+/**
+ * Create an error response for Qloo API failures
+ */
+export function createQlooApiErrorResponse(
+  requestId?: string
+): APIGatewayProxyResult {
+  return createErrorResponse(
+    HttpStatusCodes.INTERNAL_SERVER_ERROR,
+    ErrorCodes.QLOO_API_ERROR,
+    "Failed to process user preferences. Please try again later.",
+    requestId
+  );
+}
+
+/**
+ * Create an error response for unsupported HTTP methods
+ */
+export function createMethodNotAllowedResponse(
+  method: string,
+  requestId?: string
+): APIGatewayProxyResult {
+  return createErrorResponse(
+    HttpStatusCodes.METHOD_NOT_ALLOWED,
+    ErrorCodes.METHOD_NOT_ALLOWED,
+    `HTTP method ${method} is not supported`,
+    requestId
+  );
+}
+
+/**
+ * Create an error response for rate limiting
+ */
+export function createRateLimitResponse(
+  requestId?: string
+): APIGatewayProxyResult {
+  const response = createErrorResponse(
+    HttpStatusCodes.TOO_MANY_REQUESTS,
+    ErrorCodes.RATE_LIMIT_EXCEEDED,
+    "Too many requests. Please try again later.",
+    requestId
+  );
+
+  // Add Retry-After header for rate limiting
+  response.headers = {
+    ...response.headers,
+    "Retry-After": "60",
+  };
+
+  return response;
+}
+
+/**
+ * Create a generic internal error response
+ */
+export function createInternalErrorResponse(
+  requestId?: string
+): APIGatewayProxyResult {
+  return createErrorResponse(
+    HttpStatusCodes.INTERNAL_SERVER_ERROR,
+    ErrorCodes.INTERNAL_ERROR,
+    "An unexpected error occurred. Please try again later.",
+    requestId
+  );
+}
+
+/**
  * Extract request ID from Lambda context or event
  */
 export function extractRequestId(event: any, context?: any): string {
@@ -151,11 +375,16 @@ export const ErrorCodes = {
   RECORD_NOT_FOUND: "RECORD_NOT_FOUND",
   DUPLICATE_RECORD: "DUPLICATE_RECORD",
 
-  // Event Publishing
-  EVENT_PUBLISHING_ERROR: "EVENT_PUBLISHING_ERROR",
+  // Preferences-specific errors
+  PREFERENCES_NOT_FOUND: "PREFERENCES_NOT_FOUND",
+  PREFERENCES_RETRIEVAL_ERROR: "PREFERENCES_RETRIEVAL_ERROR",
+  PREFERENCES_STORAGE_ERROR: "PREFERENCES_STORAGE_ERROR",
 
   // Rate Limiting
   RATE_LIMIT_EXCEEDED: "RATE_LIMIT_EXCEEDED",
+
+  // HTTP Methods
+  METHOD_NOT_ALLOWED: "METHOD_NOT_ALLOWED",
 
   // Generic
   INTERNAL_ERROR: "INTERNAL_ERROR",

@@ -4,7 +4,25 @@ import { UserPreferencesAccess } from "../../database/access-patterns";
 import { UserPreferencesData, QlooInsights } from "../../types/data-models";
 import { QlooApiClient } from "./qloo-client"; // cspell:ignore qloo
 import { validatePreferences } from "./validation";
-import { createErrorResponse, createSuccessResponse } from "./response-utils";
+import {
+  createErrorResponse,
+  createSuccessResponse,
+  createGetPreferencesResponse,
+  createPostPreferencesResponse,
+  createEmptyPreferencesResponse,
+  createUnauthorizedResponse,
+  createValidationErrorResponse,
+  createInvalidJsonResponse,
+  createMissingBodyResponse,
+  createPreferencesRetrievalErrorResponse,
+  createPreferencesStorageErrorResponse,
+  createQlooApiErrorResponse,
+  createMethodNotAllowedResponse,
+  createRateLimitResponse,
+  createInternalErrorResponse,
+  ErrorCodes,
+  HttpStatusCodes,
+} from "./response-utils";
 import { withErrorHandling, ErrorLogger } from "../../utils/error-handler";
 import {
   BusinessMetrics,
@@ -74,17 +92,16 @@ const preferencesProcessingHandler = async (
         )
       );
       subsegment?.close();
+      const response = createValidationErrorResponse(
+        "Request validation failed",
+        event.requestContext.requestId
+      );
       return {
-        statusCode: 400,
-        headers: SECURITY_HEADERS,
-        body: JSON.stringify({
-          error: {
-            code: "INVALID_REQUEST",
-            message: "Request validation failed",
-            requestId: event.requestContext.requestId,
-            timestamp: new Date().toISOString(),
-          },
-        }),
+        ...response,
+        headers: {
+          ...response.headers,
+          ...SECURITY_HEADERS,
+        },
       };
     }
 
@@ -93,17 +110,15 @@ const preferencesProcessingHandler = async (
     if (!userId) {
       subsegment?.addError(new Error("User not authenticated"));
       subsegment?.close();
+      const response = createUnauthorizedResponse(
+        event.requestContext.requestId
+      );
       return {
-        statusCode: 401,
-        headers: SECURITY_HEADERS,
-        body: JSON.stringify({
-          error: {
-            code: "UNAUTHORIZED",
-            message: "User not authenticated",
-            requestId: event.requestContext.requestId,
-            timestamp: new Date().toISOString(),
-          },
-        }),
+        ...response,
+        headers: {
+          ...response.headers,
+          ...SECURITY_HEADERS,
+        },
       };
     }
 
@@ -114,20 +129,13 @@ const preferencesProcessingHandler = async (
       // 10 requests per minute
       subsegment?.addError(new Error("Rate limit exceeded"));
       subsegment?.close();
+      const response = createRateLimitResponse(event.requestContext.requestId);
       return {
-        statusCode: 429,
+        ...response,
         headers: {
+          ...response.headers,
           ...SECURITY_HEADERS,
-          "Retry-After": "60",
         },
-        body: JSON.stringify({
-          error: {
-            code: "RATE_LIMIT_EXCEEDED",
-            message: "Too many requests. Please try again later.",
-            requestId: event.requestContext.requestId,
-            timestamp: new Date().toISOString(),
-          },
-        }),
       };
     }
 
@@ -156,17 +164,16 @@ const preferencesProcessingHandler = async (
         new Error(`Unsupported HTTP method: ${event.httpMethod}`)
       );
       subsegment?.close();
+      const response = createMethodNotAllowedResponse(
+        event.httpMethod,
+        event.requestContext.requestId
+      );
       return {
-        statusCode: 405,
-        headers: SECURITY_HEADERS,
-        body: JSON.stringify({
-          error: {
-            code: "METHOD_NOT_ALLOWED",
-            message: `HTTP method ${event.httpMethod} is not supported`,
-            requestId: event.requestContext.requestId,
-            timestamp: new Date().toISOString(),
-          },
-        }),
+        ...response,
+        headers: {
+          ...response.headers,
+          ...SECURITY_HEADERS,
+        },
       };
     }
 
@@ -193,10 +200,8 @@ const preferencesProcessingHandler = async (
     );
     subsegment?.close();
 
-    const errorResponse = createErrorResponse(
-      500,
-      "INTERNAL_ERROR",
-      "An unexpected error occurred. Please try again later."
+    const errorResponse = createInternalErrorResponse(
+      event.requestContext.requestId
     );
 
     return {
@@ -239,14 +244,7 @@ const handleGetPreferences = async (
         requestId: event.requestContext.requestId,
       });
 
-      return createSuccessResponse(
-        {
-          preferences: null,
-          message: "No preferences found for user",
-        },
-        200,
-        event.requestContext.requestId
-      );
+      return createEmptyPreferencesResponse(event.requestContext.requestId);
     }
 
     // Record successful retrieval
@@ -264,13 +262,10 @@ const handleGetPreferences = async (
     });
 
     // Return preferences with insights and metadata
-    return createSuccessResponse(
-      {
-        preferences: preferencesData.preferences,
-        insights: preferencesData.insights,
-        lastUpdated: preferencesData.lastUpdated,
-      },
-      200,
+    return createGetPreferencesResponse(
+      preferencesData.preferences,
+      preferencesData.insights,
+      preferencesData.lastUpdated,
       event.requestContext.requestId
     );
   } catch (error) {
@@ -291,10 +286,7 @@ const handleGetPreferences = async (
       error instanceof Error ? error : new Error(String(error))
     );
 
-    return createErrorResponse(
-      500,
-      "DATABASE_ERROR",
-      "Failed to retrieve preferences. Please try again later.",
+    return createPreferencesRetrievalErrorResponse(
       event.requestContext.requestId
     );
   }
@@ -314,18 +306,7 @@ const handlePostPreferences = async (
   try {
     // Validate request body is present
     if (!event.body) {
-      return {
-        statusCode: 400,
-        headers: {},
-        body: JSON.stringify({
-          error: {
-            code: "INVALID_REQUEST",
-            message: "Request body is required",
-            requestId: event.requestContext.requestId,
-            timestamp: new Date().toISOString(),
-          },
-        }),
-      };
+      return createMissingBodyResponse(event.requestContext.requestId);
     }
 
     // Parse and validate request body
@@ -333,18 +314,7 @@ const handlePostPreferences = async (
     try {
       preferences = JSON.parse(event.body);
     } catch (error) {
-      return {
-        statusCode: 400,
-        headers: {},
-        body: JSON.stringify({
-          error: {
-            code: "INVALID_JSON",
-            message: "Invalid JSON in request body",
-            requestId: event.requestContext.requestId,
-            timestamp: new Date().toISOString(),
-          },
-        }),
-      };
+      return createInvalidJsonResponse(event.requestContext.requestId);
     }
 
     // Enhanced input validation and sanitization
@@ -353,18 +323,10 @@ const handlePostPreferences = async (
       PREFERENCES_VALIDATION_RULES
     );
     if (!inputValidation.isValid) {
-      return {
-        statusCode: 400,
-        headers: {},
-        body: JSON.stringify({
-          error: {
-            code: "VALIDATION_ERROR",
-            message: inputValidation.errors.join(", "),
-            requestId: event.requestContext.requestId,
-            timestamp: new Date().toISOString(),
-          },
-        }),
-      };
+      return createValidationErrorResponse(
+        inputValidation.errors.join(", "),
+        event.requestContext.requestId
+      );
     }
 
     // Use sanitized data
@@ -373,18 +335,10 @@ const handlePostPreferences = async (
     // Additional legacy validation for backward compatibility
     const legacyValidationResult = validatePreferences(preferences);
     if (!legacyValidationResult.isValid) {
-      return {
-        statusCode: 400,
-        headers: {},
-        body: JSON.stringify({
-          error: {
-            code: "VALIDATION_ERROR",
-            message: legacyValidationResult.errors.join(", "),
-            requestId: event.requestContext.requestId,
-            timestamp: new Date().toISOString(),
-          },
-        }),
-      };
+      return createValidationErrorResponse(
+        legacyValidationResult.errors.join(", "),
+        event.requestContext.requestId
+      );
     }
 
     // Add request context to X-Ray
@@ -468,12 +422,7 @@ const handlePostPreferences = async (
         "PreferencesProcessing"
       );
 
-      return createErrorResponse(
-        500,
-        "QLOO_API_ERROR",
-        "Failed to process user preferences. Please try again later.",
-        event.requestContext.requestId
-      );
+      return createQlooApiErrorResponse(event.requestContext.requestId);
     }
 
     // Store preferences and insights in DynamoDB
@@ -501,10 +450,7 @@ const handlePostPreferences = async (
         "PreferencesProcessing"
       );
 
-      return createErrorResponse(
-        500,
-        "DATABASE_ERROR",
-        "Failed to save preferences. Please try again later.",
+      return createPreferencesStorageErrorResponse(
         event.requestContext.requestId
       );
     }
@@ -523,13 +469,9 @@ const handlePostPreferences = async (
     });
 
     // Return success response (without workflow triggering message)
-    return createSuccessResponse(
-      {
-        message: "Preferences saved successfully",
-        preferences: preferences,
-        insights: insights,
-      },
-      200,
+    return createPostPreferencesResponse(
+      preferences,
+      insights,
       event.requestContext.requestId
     );
   } catch (error) {
@@ -546,12 +488,7 @@ const handlePostPreferences = async (
       "PreferencesProcessing"
     );
 
-    return createErrorResponse(
-      500,
-      "INTERNAL_ERROR",
-      "An unexpected error occurred. Please try again later.",
-      event.requestContext.requestId
-    );
+    return createInternalErrorResponse(event.requestContext.requestId);
   }
 };
 
