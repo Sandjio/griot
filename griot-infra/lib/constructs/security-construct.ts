@@ -439,20 +439,6 @@ export class SecurityConstruct extends Construct {
               }),
             ],
           }),
-          EventBridgePolicy: new iam.PolicyDocument({
-            statements: [
-              new iam.PolicyStatement({
-                effect: iam.Effect.ALLOW,
-                actions: ["events:PutEvents"],
-                resources: [props.eventBus.eventBusArn],
-                conditions: {
-                  StringEquals: {
-                    "events:source": ["manga.preferences"],
-                  },
-                },
-              }),
-            ],
-          }),
         },
         // Tags will be added after role creation
       }

@@ -78,16 +78,16 @@
     - Set up request parameter validation if needed
     - _Requirements: 2.2, 2.3, 2.4, 5.1, 5.5_
 
-- [ ] 6. Update IAM permissions and remove EventBridge access
+- [x] 6. Update IAM permissions and remove EventBridge access
 
-  - [ ] 6.1 Remove EventBridge permissions from lambda role
+  - [x] 6.1 Remove EventBridge permissions from lambda role
 
     - Remove EventBridge PutEvents permissions from preferences-processing role
     - Verify DynamoDB and Qloo API permissions remain intact
     - Update security construct to reflect permission changes
     - _Requirements: 4.4, 4.5_
 
-  - [ ] 6.2 Verify existing permissions for GET functionality
+  - [x] 6.2 Verify existing permissions for GET functionality
 
     - Ensure lambda has proper DynamoDB read permissions
     - Verify Cognito integration permissions are sufficient
