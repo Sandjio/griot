@@ -607,6 +607,7 @@ export class AuthUtils {
 
     // Redirect to Cognito logout
     const logoutUrl = CognitoOAuth.generateLogoutUrl();
+    console.log("Generated logout URL:", logoutUrl);
     window.location.href = logoutUrl;
   }
 
