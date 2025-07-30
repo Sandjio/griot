@@ -62,16 +62,16 @@
     - Create user-friendly error messages for different scenarios
     - _Requirements: 2.4, 5.2, 5.3, 5.4, 5.5_
 
-- [ ] 5. Update API Gateway configuration for GET method
+- [x] 5. Update API Gateway configuration for GET method
 
-  - [ ] 5.1 Add GET method to preferences resource
+  - [x] 5.1 Add GET method to preferences resource
 
     - Configure GET method on /preferences endpoint in API Gateway
     - Set up Cognito authorization for GET method
     - Add proper CORS configuration for GET requests
     - _Requirements: 2.1, 5.2_
 
-  - [ ] 5.2 Configure GET method responses and validation
+  - [x] 5.2 Configure GET method responses and validation
 
     - Add method responses for 200, 401, 404, and 500 status codes
     - Configure response models for success and error responses

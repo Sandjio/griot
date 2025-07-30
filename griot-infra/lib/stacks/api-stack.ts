@@ -437,6 +437,84 @@ export class ApiStack extends cdk.Stack {
       },
     });
 
+    const preferencesGetResponseModel = this.api.addModel(
+      "PreferencesGetResponseModel",
+      {
+        modelName: "PreferencesGetResponse",
+        contentType: "application/json",
+        schema: {
+          type: apigateway.JsonSchemaType.OBJECT,
+          properties: {
+            success: {
+              type: apigateway.JsonSchemaType.BOOLEAN,
+            },
+            data: {
+              type: apigateway.JsonSchemaType.OBJECT,
+              properties: {
+                preferences: {
+                  oneOf: [
+                    {
+                      type: apigateway.JsonSchemaType.NULL,
+                    },
+                    {
+                      type: apigateway.JsonSchemaType.OBJECT,
+                      properties: {
+                        genres: {
+                          type: apigateway.JsonSchemaType.ARRAY,
+                          items: {
+                            type: apigateway.JsonSchemaType.STRING,
+                          },
+                        },
+                        themes: {
+                          type: apigateway.JsonSchemaType.ARRAY,
+                          items: {
+                            type: apigateway.JsonSchemaType.STRING,
+                          },
+                        },
+                        artStyle: {
+                          type: apigateway.JsonSchemaType.STRING,
+                        },
+                        targetAudience: {
+                          type: apigateway.JsonSchemaType.STRING,
+                        },
+                        contentRating: {
+                          type: apigateway.JsonSchemaType.STRING,
+                        },
+                      },
+                      required: [
+                        "genres",
+                        "themes",
+                        "artStyle",
+                        "targetAudience",
+                        "contentRating",
+                      ],
+                    },
+                  ],
+                },
+                insights: {
+                  type: apigateway.JsonSchemaType.OBJECT,
+                },
+                lastUpdated: {
+                  type: apigateway.JsonSchemaType.STRING,
+                },
+                message: {
+                  type: apigateway.JsonSchemaType.STRING,
+                },
+              },
+              required: ["preferences"],
+            },
+            requestId: {
+              type: apigateway.JsonSchemaType.STRING,
+            },
+            timestamp: {
+              type: apigateway.JsonSchemaType.STRING,
+            },
+          },
+          required: ["success", "data", "requestId", "timestamp"],
+        },
+      }
+    );
+
     // Preferences Processing Lambda function with security configuration
     const preferencesLambda = new NodejsFunction(this, "PreferencesLambda", {
       functionName: `manga-preferences-${props.environment}`,
@@ -553,6 +631,8 @@ export class ApiStack extends cdk.Stack {
     );
 
     const preferencesResource = this.api.root.addResource("preferences");
+
+    // POST method for creating/updating preferences
     preferencesResource.addMethod(
       "POST",
       new apigateway.LambdaIntegration(preferencesLambda, {
@@ -616,6 +696,44 @@ export class ApiStack extends cdk.Stack {
           },
           {
             statusCode: "401",
+            responseModels: {
+              "application/json": errorResponseModel,
+            },
+          },
+          {
+            statusCode: "500",
+            responseModels: {
+              "application/json": errorResponseModel,
+            },
+          },
+        ],
+      }
+    );
+
+    // GET method for retrieving preferences
+    preferencesResource.addMethod(
+      "GET",
+      new apigateway.LambdaIntegration(preferencesLambda, {
+        proxy: true,
+      }),
+      {
+        authorizer,
+        authorizationType: apigateway.AuthorizationType.COGNITO,
+        methodResponses: [
+          {
+            statusCode: "200",
+            responseModels: {
+              "application/json": preferencesGetResponseModel,
+            },
+          },
+          {
+            statusCode: "401",
+            responseModels: {
+              "application/json": errorResponseModel,
+            },
+          },
+          {
+            statusCode: "404",
             responseModels: {
               "application/json": errorResponseModel,
             },
