@@ -23,16 +23,16 @@
     - Add unit tests for new database access method
     - _Requirements: 3.1, 3.2, 3.3_
 
-- [ ] 3. Remove EventBridge integration from preferences workflow
+- [x] 3. Remove EventBridge integration from preferences workflow
 
-  - [ ] 3.1 Remove EventBridge publishing code from POST handler
+  - [x] 3.1 Remove EventBridge publishing code from POST handler
 
     - Comment out or remove EventPublishingHelpers.publishStoryGeneration calls
     - Remove EventBridge-related error handling and logging
     - Update response messages to reflect that workflow triggering is removed
     - _Requirements: 4.1, 4.2, 4.3, 4.4_
 
-  - [ ] 3.2 Update GenerationRequest handling
+  - [x] 3.2 Update GenerationRequest handling
 
     - Remove or modify GenerationRequest creation and status updates
     - Simplify the POST handler flow to focus only on preference storage

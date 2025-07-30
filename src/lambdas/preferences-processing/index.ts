@@ -1,20 +1,14 @@
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
-import { v4 as uuidv4 } from "uuid";
 import AWSXRay from "aws-xray-sdk-core";
 import { UserPreferencesAccess } from "../../database/access-patterns";
 import { UserPreferencesData, QlooInsights } from "../../types/data-models";
 import { QlooApiClient } from "./qloo-client"; // cspell:ignore qloo
 import { validatePreferences } from "./validation";
 import { createErrorResponse, createSuccessResponse } from "./response-utils";
-import {
-  withErrorHandling,
-  CorrelationContext,
-  ErrorLogger,
-} from "../../utils/error-handler";
+import { withErrorHandling, ErrorLogger } from "../../utils/error-handler";
 import {
   BusinessMetrics,
   PerformanceTimer,
-  METRIC_NAMESPACES,
 } from "../../utils/cloudwatch-metrics";
 import {
   InputValidator,

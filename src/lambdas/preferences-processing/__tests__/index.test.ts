@@ -11,9 +11,6 @@ import {
 // Mock dependencies
 jest.mock("../../../database/access-patterns");
 jest.mock("../qloo-client");
-jest.mock("uuid", () => ({
-  v4: jest.fn(() => "test-request-id-123"),
-}));
 
 const mockUserPreferencesAccess = UserPreferencesAccess as jest.Mocked<
   typeof UserPreferencesAccess
