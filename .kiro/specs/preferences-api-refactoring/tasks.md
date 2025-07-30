@@ -1,6 +1,6 @@
 # Implementation Plan
 
-- [ ] 1. Update preferences-processing lambda to support GET method
+- [x] 1. Update preferences-processing lambda to support GET method
 
   - Modify the main handler to route between GET and POST methods
   - Remove EventBridge integration code from POST handler

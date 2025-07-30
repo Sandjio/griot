@@ -1,11 +1,7 @@
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
 import { v4 as uuidv4 } from "uuid";
 import AWSXRay from "aws-xray-sdk-core";
-import {
-  UserPreferencesAccess,
-  GenerationRequestAccess,
-} from "../../database/access-patterns";
-import { EventPublishingHelpers } from "../../utils/event-publisher";
+import { UserPreferencesAccess } from "../../database/access-patterns";
 import { UserPreferencesData, QlooInsights } from "../../types/data-models";
 import { QlooApiClient } from "./qloo-client"; // cspell:ignore qloo
 import { validatePreferences } from "./validation";
@@ -34,10 +30,11 @@ import {
 /**
  * Preferences Processing Lambda Function
  *
- * Handles user preference submission, integrates with Qloo API for insights,
- * stores data in DynamoDB, and publishes events for story generation.
+ * Handles user preference submission and retrieval.
+ * - POST: Integrates with Qloo API for insights and stores data in DynamoDB
+ * - GET: Retrieves user preferences from DynamoDB
  *
- * Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6
+ * Requirements: 1.1, 1.4, 2.1, 2.2
  */
 
 interface PreferencesProcessingEvent extends APIGatewayProxyEvent {
@@ -51,6 +48,9 @@ interface PreferencesProcessingEvent extends APIGatewayProxyEvent {
   };
 }
 
+/**
+ * Main handler that routes between GET and POST methods
+ */
 const preferencesProcessingHandler = async (
   event: PreferencesProcessingEvent,
   correlationId: string
@@ -59,9 +59,6 @@ const preferencesProcessingHandler = async (
   const segment = AWSXRay.getSegment();
   const subsegment = segment?.addNewSubsegment("PreferencesProcessing");
 
-  // Start performance timer
-  const operationTimer = new PerformanceTimer("PreferencesProcessing");
-
   ErrorLogger.logInfo(
     "Preferences Processing Lambda invoked",
     {
@@ -69,7 +66,6 @@ const preferencesProcessingHandler = async (
       httpMethod: event.httpMethod,
       path: event.path,
       correlationId,
-      // traceId: segment?.trace_id,
     },
     "PreferencesProcessing"
   );
@@ -150,17 +146,29 @@ const preferencesProcessingHandler = async (
       clientIp,
     });
 
-    // Parse and validate request body
-    if (!event.body) {
-      subsegment?.addError(new Error("Request body is required"));
+    // Route to appropriate handler based on HTTP method
+    let result: APIGatewayProxyResult;
+    if (event.httpMethod === "GET") {
+      result = await handleGetPreferences(event, userId, subsegment);
+    } else if (event.httpMethod === "POST") {
+      result = await handlePostPreferences(
+        event,
+        userId,
+        subsegment,
+        correlationId
+      );
+    } else {
+      subsegment?.addError(
+        new Error(`Unsupported HTTP method: ${event.httpMethod}`)
+      );
       subsegment?.close();
       return {
-        statusCode: 400,
+        statusCode: 405,
         headers: SECURITY_HEADERS,
         body: JSON.stringify({
           error: {
-            code: "INVALID_REQUEST",
-            message: "Request body is required",
+            code: "METHOD_NOT_ALLOWED",
+            message: `HTTP method ${event.httpMethod} is not supported`,
             requestId: event.requestContext.requestId,
             timestamp: new Date().toISOString(),
           },
@@ -168,351 +176,20 @@ const preferencesProcessingHandler = async (
       };
     }
 
-    let preferences: UserPreferencesData;
-    try {
-      preferences = JSON.parse(event.body);
-    } catch (error) {
-      subsegment?.addError(
-        error instanceof Error ? error : new Error(String(error))
-      );
-      subsegment?.close();
-      return {
-        statusCode: 400,
-        headers: SECURITY_HEADERS,
-        body: JSON.stringify({
-          error: {
-            code: "INVALID_JSON",
-            message: "Invalid JSON in request body",
-            requestId: event.requestContext.requestId,
-            timestamp: new Date().toISOString(),
-          },
-        }),
-      };
-    }
-
-    // Enhanced input validation and sanitization
-    const inputValidation = InputValidator.validate(
-      preferences,
-      PREFERENCES_VALIDATION_RULES
-    );
-    if (!inputValidation.isValid) {
-      const validationError = new Error(
-        `Input validation failed: ${inputValidation.errors.join(", ")}`
-      );
-      subsegment?.addError(validationError);
-      subsegment?.close();
-      return {
-        statusCode: 400,
-        headers: SECURITY_HEADERS,
-        body: JSON.stringify({
-          error: {
-            code: "VALIDATION_ERROR",
-            message: inputValidation.errors.join(", "),
-            requestId: event.requestContext.requestId,
-            timestamp: new Date().toISOString(),
-          },
-        }),
-      };
-    }
-
-    // Use sanitized data
-    preferences = inputValidation.sanitizedData as UserPreferencesData;
-
-    // Additional legacy validation for backward compatibility
-    const legacyValidationResult = validatePreferences(preferences);
-    if (!legacyValidationResult.isValid) {
-      const validationError = new Error(
-        `Legacy validation failed: ${legacyValidationResult.errors.join(", ")}`
-      );
-      subsegment?.addError(validationError);
-      subsegment?.close();
-      return {
-        statusCode: 400,
-        headers: SECURITY_HEADERS,
-        body: JSON.stringify({
-          error: {
-            code: "VALIDATION_ERROR",
-            message: legacyValidationResult.errors.join(", "),
-            requestId: event.requestContext.requestId,
-            timestamp: new Date().toISOString(),
-          },
-        }),
-      };
-    }
-
-    // Generate unique request ID for tracking
-    const requestId = uuidv4();
-    const timestamp = new Date().toISOString();
-
-    // Add request context to X-Ray
-    subsegment?.addAnnotation("requestId", requestId);
-    subsegment?.addMetadata("preferences", {
-      genres: preferences.genres,
-      themes: preferences.themes,
-      artStyle: preferences.artStyle,
-      targetAudience: preferences.targetAudience,
-      contentRating: preferences.contentRating,
-    });
-
-    ErrorLogger.logInfo(
-      "Processing preferences for user",
-      {
-        userId,
-        requestId,
-        correlationId,
-        preferences: {
-          genres: preferences.genres,
-          themes: preferences.themes,
-          artStyle: preferences.artStyle,
-          targetAudience: preferences.targetAudience,
-          contentRating: preferences.contentRating,
-        },
-      },
-      "PreferencesProcessing"
-    );
-
-    // Record business metrics
-    await BusinessMetrics.recordPreferenceSubmission(userId);
-    await BusinessMetrics.recordStoryGenerationRequest(userId);
-
-    // Create generation request record with timing
-    const dbTimer = new PerformanceTimer("DynamoDB-CreateRequest");
-    await GenerationRequestAccess.create({
-      requestId,
-      userId,
-      type: "STORY",
-      status: "PENDING",
-      createdAt: timestamp,
-    });
-    const dbDuration = dbTimer.stop();
-
-    // Initialize Qloo API client
-    const qlooClient = new QlooApiClient();
-    let insights: QlooInsights;
-
-    try {
-      // Create X-Ray subsegment for Qloo API call
-      const qlooSubsegment = subsegment?.addNewSubsegment("QlooAPI");
-      const qlooTimer = new PerformanceTimer("QlooAPI");
-
-      try {
-        // Fetch insights from Qloo API with retry logic
-        insights = await qlooClient.fetchInsights(preferences);
-
-        const qlooDuration = qlooTimer.stop();
-
-        // Record successful Qloo API metrics
-        // Note: These would be called from within the QlooApiClient
-        // but we're recording here for demonstration
-
-        qlooSubsegment?.addAnnotation("success", true);
-        qlooSubsegment?.addMetadata("response", {
-          recommendationsCount: insights.recommendations.length,
-          trendsCount: insights.trends.length,
-          duration: qlooDuration,
-        });
-        qlooSubsegment?.close();
-
-        ErrorLogger.logInfo("Successfully fetched Qloo insights", {
-          userId,
-          requestId,
-          insightsCount: insights.recommendations.length,
-          trendsCount: insights.trends.length,
-          duration: qlooDuration,
-        });
-      } catch (qlooError) {
-        const qlooDuration = qlooTimer.stop();
-
-        qlooSubsegment?.addError(
-          qlooError instanceof Error ? qlooError : new Error(String(qlooError))
-        );
-        qlooSubsegment?.addAnnotation("success", false);
-        qlooSubsegment?.close();
-
-        throw qlooError;
-      }
-    } catch (error) {
-      ErrorLogger.logError(
-        error instanceof Error ? error : new Error(String(error)),
-        { userId, requestId, operation: "QlooAPI" },
-        "PreferencesProcessing"
-      );
-
-      // Update request status to failed
-      await GenerationRequestAccess.updateStatus(userId, requestId, "FAILED", {
-        errorMessage: "Failed to fetch user insights from Qloo API",
-      });
-
-      // Record failure metrics
-      await BusinessMetrics.recordStoryGenerationFailure(
-        userId,
-        "QLOO_API_ERROR"
-      );
-
-      subsegment?.addError(
-        error instanceof Error ? error : new Error(String(error))
-      );
-      subsegment?.close();
-
-      return createErrorResponse(
-        500,
-        "QLOO_API_ERROR",
-        "Failed to process user preferences. Please try again later."
-      );
-    }
-
-    try {
-      // Store preferences and insights in DynamoDB with timing
-      const storeTimer = new PerformanceTimer("DynamoDB-StorePreferences");
-      await UserPreferencesAccess.create(userId, {
-        preferences,
-        insights,
-      });
-      const storeDuration = storeTimer.stop();
-
-      ErrorLogger.logInfo("Successfully stored preferences and insights", {
-        userId,
-        requestId,
-        duration: storeDuration,
-      });
-    } catch (error) {
-      ErrorLogger.logError(
-        error instanceof Error ? error : new Error(String(error)),
-        { userId, requestId, operation: "DynamoDB-Store" },
-        "PreferencesProcessing"
-      );
-
-      // Update request status to failed
-      await GenerationRequestAccess.updateStatus(userId, requestId, "FAILED", {
-        errorMessage: "Failed to store user preferences",
-      });
-
-      // Record failure metrics
-      await BusinessMetrics.recordStoryGenerationFailure(
-        userId,
-        "DATABASE_ERROR"
-      );
-
-      subsegment?.addError(
-        error instanceof Error ? error : new Error(String(error))
-      );
-      subsegment?.close();
-
-      return createErrorResponse(
-        500,
-        "DATABASE_ERROR",
-        "Failed to save preferences. Please try again later."
-      );
-    }
-
-    try {
-      // Update request status to processing
-      await GenerationRequestAccess.updateStatus(
-        userId,
-        requestId,
-        "PROCESSING"
-      );
-
-      // Log environment variables for debugging
-      ErrorLogger.logInfo("EventBridge configuration check", {
-        userId,
-        requestId,
-        eventBusName: process.env.EVENT_BUS_NAME,
-        hasEventBusName: !!process.env.EVENT_BUS_NAME,
-        awsRegion: process.env.AWS_REGION,
-      });
-
-      // Publish story generation event to EventBridge with timing
-      const eventTimer = new PerformanceTimer("EventBridge-Publish");
-      await EventPublishingHelpers.publishStoryGeneration(
-        userId,
-        requestId,
-        preferences,
-        insights
-      );
-      const eventDuration = eventTimer.stop();
-
-      ErrorLogger.logInfo("Successfully published story generation event", {
-        userId,
-        requestId,
-        duration: eventDuration,
-      });
-    } catch (error) {
-      ErrorLogger.logError(
-        error instanceof Error ? error : new Error(String(error)),
-        {
-          userId,
-          requestId,
-          operation: "EventBridge-Publish",
-          eventBusName: process.env.EVENT_BUS_NAME,
-          errorDetails: error instanceof Error ? error.message : String(error),
-        },
-        "PreferencesProcessing"
-      );
-
-      // Update request status to failed
-      await GenerationRequestAccess.updateStatus(userId, requestId, "FAILED", {
-        errorMessage: "Failed to initiate story generation",
-      });
-
-      // Record failure metrics
-      await BusinessMetrics.recordStoryGenerationFailure(
-        userId,
-        "EVENT_PUBLISHING_ERROR"
-      );
-
-      subsegment?.addError(
-        error instanceof Error ? error : new Error(String(error))
-      );
-      subsegment?.close();
-
-      return createErrorResponse(
-        500,
-        "EVENT_PUBLISHING_ERROR",
-        "Failed to initiate story generation. Please try again later."
-      );
-    }
-
-    // Record successful completion
-    const totalDuration = operationTimer.stop();
-    subsegment?.addAnnotation("success", true);
-    subsegment?.addMetadata("performance", {
-      totalDuration,
-      dbDuration,
-    });
     subsegment?.close();
-
-    ErrorLogger.logInfo("Preferences processing completed successfully", {
-      userId,
-      requestId,
-      totalDuration,
-    });
-
-    // Return success response with request ID for tracking and security headers
-    const successResponse = createSuccessResponse({
-      requestId,
-      status: "PROCESSING",
-      message:
-        "Preferences submitted successfully. Story generation has been initiated.",
-      estimatedCompletionTime: "2-3 minutes",
-    });
-
     return {
-      ...successResponse,
+      ...result,
       headers: {
-        ...successResponse.headers,
+        ...result.headers,
         ...SECURITY_HEADERS,
       },
     };
   } catch (error) {
-    const totalDuration = operationTimer.stop();
-
     ErrorLogger.logError(
       error instanceof Error ? error : new Error(String(error)),
       {
         requestId: event.requestContext.requestId,
         correlationId,
-        totalDuration,
       },
       "PreferencesProcessing"
     );
@@ -535,6 +212,350 @@ const preferencesProcessingHandler = async (
         ...SECURITY_HEADERS,
       },
     };
+  }
+};
+
+/**
+ * Handle GET requests to retrieve user preferences
+ */
+const handleGetPreferences = async (
+  event: PreferencesProcessingEvent,
+  userId: string,
+  subsegment?: AWSXRay.Subsegment
+): Promise<APIGatewayProxyResult> => {
+  const operationTimer = new PerformanceTimer("GetPreferences");
+
+  try {
+    ErrorLogger.logInfo("Retrieving preferences for user", {
+      userId,
+      requestId: event.requestContext.requestId,
+    });
+
+    // Retrieve latest preferences from DynamoDB
+    const dbTimer = new PerformanceTimer("DynamoDB-GetPreferences");
+    const userPreferences = await UserPreferencesAccess.getLatest(userId);
+    const dbDuration = dbTimer.stop();
+
+    if (!userPreferences) {
+      // User has no stored preferences - return empty response
+      ErrorLogger.logInfo("No preferences found for user", {
+        userId,
+        requestId: event.requestContext.requestId,
+      });
+
+      return createSuccessResponse(
+        {
+          preferences: null,
+          message: "No preferences found for user",
+        },
+        200,
+        event.requestContext.requestId
+      );
+    }
+
+    // Record successful retrieval
+    const totalDuration = operationTimer.stop();
+    subsegment?.addAnnotation("success", true);
+    subsegment?.addMetadata("performance", {
+      totalDuration,
+      dbDuration,
+    });
+
+    ErrorLogger.logInfo("Successfully retrieved preferences", {
+      userId,
+      requestId: event.requestContext.requestId,
+      totalDuration,
+    });
+
+    // Return preferences with insights and metadata
+    return createSuccessResponse(
+      {
+        preferences: userPreferences.preferences,
+        insights: userPreferences.insights,
+        lastUpdated: userPreferences.createdAt,
+      },
+      200,
+      event.requestContext.requestId
+    );
+  } catch (error) {
+    const totalDuration = operationTimer.stop();
+
+    ErrorLogger.logError(
+      error instanceof Error ? error : new Error(String(error)),
+      {
+        userId,
+        requestId: event.requestContext.requestId,
+        operation: "GetPreferences",
+        totalDuration,
+      },
+      "PreferencesProcessing"
+    );
+
+    subsegment?.addError(
+      error instanceof Error ? error : new Error(String(error))
+    );
+
+    return createErrorResponse(
+      500,
+      "DATABASE_ERROR",
+      "Failed to retrieve preferences. Please try again later.",
+      event.requestContext.requestId
+    );
+  }
+};
+
+/**
+ * Handle POST requests to store user preferences
+ */
+const handlePostPreferences = async (
+  event: PreferencesProcessingEvent,
+  userId: string,
+  subsegment?: AWSXRay.Subsegment,
+  correlationId?: string
+): Promise<APIGatewayProxyResult> => {
+  const operationTimer = new PerformanceTimer("PostPreferences");
+
+  try {
+    // Validate request body is present
+    if (!event.body) {
+      return {
+        statusCode: 400,
+        headers: {},
+        body: JSON.stringify({
+          error: {
+            code: "INVALID_REQUEST",
+            message: "Request body is required",
+            requestId: event.requestContext.requestId,
+            timestamp: new Date().toISOString(),
+          },
+        }),
+      };
+    }
+
+    // Parse and validate request body
+    let preferences: UserPreferencesData;
+    try {
+      preferences = JSON.parse(event.body);
+    } catch (error) {
+      return {
+        statusCode: 400,
+        headers: {},
+        body: JSON.stringify({
+          error: {
+            code: "INVALID_JSON",
+            message: "Invalid JSON in request body",
+            requestId: event.requestContext.requestId,
+            timestamp: new Date().toISOString(),
+          },
+        }),
+      };
+    }
+
+    // Enhanced input validation and sanitization
+    const inputValidation = InputValidator.validate(
+      preferences,
+      PREFERENCES_VALIDATION_RULES
+    );
+    if (!inputValidation.isValid) {
+      return {
+        statusCode: 400,
+        headers: {},
+        body: JSON.stringify({
+          error: {
+            code: "VALIDATION_ERROR",
+            message: inputValidation.errors.join(", "),
+            requestId: event.requestContext.requestId,
+            timestamp: new Date().toISOString(),
+          },
+        }),
+      };
+    }
+
+    // Use sanitized data
+    preferences = inputValidation.sanitizedData as UserPreferencesData;
+
+    // Additional legacy validation for backward compatibility
+    const legacyValidationResult = validatePreferences(preferences);
+    if (!legacyValidationResult.isValid) {
+      return {
+        statusCode: 400,
+        headers: {},
+        body: JSON.stringify({
+          error: {
+            code: "VALIDATION_ERROR",
+            message: legacyValidationResult.errors.join(", "),
+            requestId: event.requestContext.requestId,
+            timestamp: new Date().toISOString(),
+          },
+        }),
+      };
+    }
+
+    // Add request context to X-Ray
+    subsegment?.addMetadata("preferences", {
+      genres: preferences.genres,
+      themes: preferences.themes,
+      artStyle: preferences.artStyle,
+      targetAudience: preferences.targetAudience,
+      contentRating: preferences.contentRating,
+    });
+
+    ErrorLogger.logInfo(
+      "Processing preferences for user",
+      {
+        userId,
+        requestId: event.requestContext.requestId,
+        correlationId,
+        preferences: {
+          genres: preferences.genres,
+          themes: preferences.themes,
+          artStyle: preferences.artStyle,
+          targetAudience: preferences.targetAudience,
+          contentRating: preferences.contentRating,
+        },
+      },
+      "PreferencesProcessing"
+    );
+
+    // Record business metrics
+    await BusinessMetrics.recordPreferenceSubmission(userId);
+
+    // Initialize Qloo API client and fetch insights
+    const qlooClient = new QlooApiClient();
+    let insights: QlooInsights;
+
+    try {
+      // Create X-Ray subsegment for Qloo API call
+      const qlooSubsegment = subsegment?.addNewSubsegment("QlooAPI");
+      const qlooTimer = new PerformanceTimer("QlooAPI");
+
+      try {
+        // Fetch insights from Qloo API with retry logic
+        insights = await qlooClient.fetchInsights(preferences);
+
+        const qlooDuration = qlooTimer.stop();
+
+        qlooSubsegment?.addAnnotation("success", true);
+        qlooSubsegment?.addMetadata("response", {
+          recommendationsCount: insights.recommendations.length,
+          trendsCount: insights.trends.length,
+          duration: qlooDuration,
+        });
+        qlooSubsegment?.close();
+
+        ErrorLogger.logInfo("Successfully fetched Qloo insights", {
+          userId,
+          requestId: event.requestContext.requestId,
+          insightsCount: insights.recommendations.length,
+          trendsCount: insights.trends.length,
+          duration: qlooDuration,
+        });
+      } catch (qlooError) {
+        const qlooDuration = qlooTimer.stop();
+
+        qlooSubsegment?.addError(
+          qlooError instanceof Error ? qlooError : new Error(String(qlooError))
+        );
+        qlooSubsegment?.addAnnotation("success", false);
+        qlooSubsegment?.close();
+
+        throw qlooError;
+      }
+    } catch (error) {
+      ErrorLogger.logError(
+        error instanceof Error ? error : new Error(String(error)),
+        {
+          userId,
+          requestId: event.requestContext.requestId,
+          operation: "QlooAPI",
+        },
+        "PreferencesProcessing"
+      );
+
+      return createErrorResponse(
+        500,
+        "QLOO_API_ERROR",
+        "Failed to process user preferences. Please try again later.",
+        event.requestContext.requestId
+      );
+    }
+
+    // Store preferences and insights in DynamoDB
+    try {
+      const storeTimer = new PerformanceTimer("DynamoDB-StorePreferences");
+      await UserPreferencesAccess.create(userId, {
+        preferences,
+        insights,
+      });
+      const storeDuration = storeTimer.stop();
+
+      ErrorLogger.logInfo("Successfully stored preferences and insights", {
+        userId,
+        requestId: event.requestContext.requestId,
+        duration: storeDuration,
+      });
+    } catch (error) {
+      ErrorLogger.logError(
+        error instanceof Error ? error : new Error(String(error)),
+        {
+          userId,
+          requestId: event.requestContext.requestId,
+          operation: "DynamoDB-Store",
+        },
+        "PreferencesProcessing"
+      );
+
+      return createErrorResponse(
+        500,
+        "DATABASE_ERROR",
+        "Failed to save preferences. Please try again later.",
+        event.requestContext.requestId
+      );
+    }
+
+    // Record successful completion
+    const totalDuration = operationTimer.stop();
+    subsegment?.addAnnotation("success", true);
+    subsegment?.addMetadata("performance", {
+      totalDuration,
+    });
+
+    ErrorLogger.logInfo("Preferences processing completed successfully", {
+      userId,
+      requestId: event.requestContext.requestId,
+      totalDuration,
+    });
+
+    // Return success response (without workflow triggering message)
+    return createSuccessResponse(
+      {
+        message: "Preferences saved successfully",
+        preferences: preferences,
+        insights: insights,
+      },
+      200,
+      event.requestContext.requestId
+    );
+  } catch (error) {
+    const totalDuration = operationTimer.stop();
+
+    ErrorLogger.logError(
+      error instanceof Error ? error : new Error(String(error)),
+      {
+        userId,
+        requestId: event.requestContext.requestId,
+        operation: "PostPreferences",
+        totalDuration,
+      },
+      "PreferencesProcessing"
+    );
+
+    return createErrorResponse(
+      500,
+      "INTERNAL_ERROR",
+      "An unexpected error occurred. Please try again later.",
+      event.requestContext.requestId
+    );
   }
 };
 

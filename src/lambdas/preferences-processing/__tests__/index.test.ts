@@ -1,16 +1,15 @@
 import { APIGatewayProxyEvent, Context } from "aws-lambda";
 import { handler } from "../index";
-import {
-  UserPreferencesAccess,
-  GenerationRequestAccess,
-} from "../../../database/access-patterns";
-import { EventPublishingHelpers } from "../../../utils/event-publisher";
+import { UserPreferencesAccess } from "../../../database/access-patterns";
 import { QlooApiClient } from "../qloo-client";
-import { UserPreferencesData, QlooInsights } from "../../../types/data-models";
+import {
+  UserPreferencesData,
+  QlooInsights,
+  UserPreferences,
+} from "../../../types/data-models";
 
 // Mock dependencies
 jest.mock("../../../database/access-patterns");
-jest.mock("../../../utils/event-publisher");
 jest.mock("../qloo-client");
 jest.mock("uuid", () => ({
   v4: jest.fn(() => "test-request-id-123"),
@@ -18,12 +17,6 @@ jest.mock("uuid", () => ({
 
 const mockUserPreferencesAccess = UserPreferencesAccess as jest.Mocked<
   typeof UserPreferencesAccess
->;
-const mockGenerationRequestAccess = GenerationRequestAccess as jest.Mocked<
-  typeof GenerationRequestAccess
->;
-const mockEventPublishingHelpers = EventPublishingHelpers as jest.Mocked<
-  typeof EventPublishingHelpers
 >;
 const mockQlooApiClient = QlooApiClient as jest.MockedClass<
   typeof QlooApiClient
@@ -67,16 +60,28 @@ describe("Preferences Processing Lambda", () => {
     ],
   };
 
+  const mockUserPreferencesData: UserPreferences = {
+    PK: "USER#test-user-123",
+    SK: "PREFERENCES#2023-01-01T00:00:00.000Z",
+    GSI1PK: "USER#test-user-123",
+    GSI1SK: "PREFERENCES#2023-01-01T00:00:00.000Z",
+    createdAt: "2023-01-01T00:00:00.000Z",
+    preferences: validPreferences,
+    insights: mockInsights,
+  };
+
   const createMockEvent = (
-    body: string | null,
+    httpMethod: string = "POST",
+    body: string | null = null,
     userId: string = "test-user-123"
   ): APIGatewayProxyEvent => ({
-    httpMethod: "POST",
+    httpMethod,
     path: "/preferences",
     pathParameters: null,
     queryStringParameters: null,
     headers: {
       "Content-Type": "application/json",
+      "User-Agent": "test-agent",
     },
     body,
     isBase64Encoded: false,
@@ -85,7 +90,7 @@ describe("Preferences Processing Lambda", () => {
       stage: "test",
       resourceId: "test-resource",
       resourcePath: "/preferences",
-      httpMethod: "POST",
+      httpMethod,
       requestTime: "01/Jan/2023:00:00:00 +0000",
       requestTimeEpoch: 1672531200000,
       path: "/test/preferences",
@@ -128,10 +133,10 @@ describe("Preferences Processing Lambda", () => {
     jest.clearAllMocks();
 
     // Setup default mocks
-    mockGenerationRequestAccess.create.mockResolvedValue();
-    mockGenerationRequestAccess.updateStatus.mockResolvedValue();
     mockUserPreferencesAccess.create.mockResolvedValue();
-    mockEventPublishingHelpers.publishStoryGeneration.mockResolvedValue();
+    mockUserPreferencesAccess.getLatest.mockResolvedValue(
+      mockUserPreferencesData
+    );
 
     const mockQlooInstance = {
       fetchInsights: jest.fn().mockResolvedValue(mockInsights),
@@ -140,8 +145,27 @@ describe("Preferences Processing Lambda", () => {
   });
 
   describe("Authentication", () => {
-    it("should return 401 when user is not authenticated", async () => {
-      const event = createMockEvent(JSON.stringify(validPreferences), "");
+    it("should return 401 when user is not authenticated for POST", async () => {
+      const event = createMockEvent(
+        "POST",
+        JSON.stringify(validPreferences),
+        ""
+      );
+      event.requestContext.authorizer = undefined;
+
+      const result = await handler(event, mockContext);
+
+      expect(result.statusCode).toBe(401);
+      expect(JSON.parse(result.body)).toMatchObject({
+        error: {
+          code: "UNAUTHORIZED",
+          message: "User not authenticated",
+        },
+      });
+    });
+
+    it("should return 401 when user is not authenticated for GET", async () => {
+      const event = createMockEvent("GET", null, "");
       event.requestContext.authorizer = undefined;
 
       const result = await handler(event, mockContext);
@@ -156,9 +180,86 @@ describe("Preferences Processing Lambda", () => {
     });
   });
 
-  describe("Request Validation", () => {
+  describe("Method Routing", () => {
+    it("should return 405 for unsupported HTTP methods", async () => {
+      const event = createMockEvent("DELETE", null);
+
+      const result = await handler(event, mockContext);
+
+      expect(result.statusCode).toBe(405);
+      expect(JSON.parse(result.body)).toMatchObject({
+        error: {
+          code: "METHOD_NOT_ALLOWED",
+          message: "HTTP method DELETE is not supported",
+        },
+      });
+    });
+  });
+
+  describe("GET Endpoint", () => {
+    it("should retrieve user preferences successfully", async () => {
+      const event = createMockEvent("GET");
+
+      const result = await handler(event, mockContext);
+
+      expect(result.statusCode).toBe(200);
+      expect(mockUserPreferencesAccess.getLatest).toHaveBeenCalledWith(
+        "test-user-123"
+      );
+
+      const responseBody = JSON.parse(result.body);
+      expect(responseBody).toMatchObject({
+        success: true,
+        data: {
+          preferences: validPreferences,
+          insights: mockInsights,
+          lastUpdated: "2023-01-01T00:00:00.000Z",
+        },
+      });
+    });
+
+    it("should return empty response when user has no preferences", async () => {
+      mockUserPreferencesAccess.getLatest.mockResolvedValue(null);
+      const event = createMockEvent("GET");
+
+      const result = await handler(event, mockContext);
+
+      expect(result.statusCode).toBe(200);
+      expect(mockUserPreferencesAccess.getLatest).toHaveBeenCalledWith(
+        "test-user-123"
+      );
+
+      const responseBody = JSON.parse(result.body);
+      expect(responseBody).toMatchObject({
+        success: true,
+        data: {
+          preferences: null,
+          message: "No preferences found for user",
+        },
+      });
+    });
+
+    it("should handle database errors when retrieving preferences", async () => {
+      mockUserPreferencesAccess.getLatest.mockRejectedValue(
+        new Error("Database error")
+      );
+      const event = createMockEvent("GET");
+
+      const result = await handler(event, mockContext);
+
+      expect(result.statusCode).toBe(500);
+      expect(JSON.parse(result.body)).toMatchObject({
+        error: {
+          code: "DATABASE_ERROR",
+          message: "Failed to retrieve preferences. Please try again later.",
+        },
+      });
+    });
+  });
+
+  describe("POST Endpoint - Request Validation", () => {
     it("should return 400 when request body is missing", async () => {
-      const event = createMockEvent(null);
+      const event = createMockEvent("POST", null);
 
       const result = await handler(event, mockContext);
 
@@ -172,7 +273,7 @@ describe("Preferences Processing Lambda", () => {
     });
 
     it("should return 400 when request body is invalid JSON", async () => {
-      const event = createMockEvent("invalid json");
+      const event = createMockEvent("POST", "invalid json");
 
       const result = await handler(event, mockContext);
 
@@ -193,7 +294,7 @@ describe("Preferences Processing Lambda", () => {
         targetAudience: "Young Adults",
         contentRating: "PG-13",
       };
-      const event = createMockEvent(JSON.stringify(invalidPreferences));
+      const event = createMockEvent("POST", JSON.stringify(invalidPreferences));
 
       const result = await handler(event, mockContext);
 
@@ -206,9 +307,9 @@ describe("Preferences Processing Lambda", () => {
     });
   });
 
-  describe("Successful Processing", () => {
-    it("should process preferences successfully", async () => {
-      const event = createMockEvent(JSON.stringify(validPreferences));
+  describe("POST Endpoint - Successful Processing", () => {
+    it("should process preferences successfully without EventBridge integration", async () => {
+      const event = createMockEvent("POST", JSON.stringify(validPreferences));
 
       const result = await handler(event, mockContext);
 
@@ -218,23 +319,13 @@ describe("Preferences Processing Lambda", () => {
       expect(responseBody).toMatchObject({
         success: true,
         data: {
-          requestId: "test-request-id-123",
-          status: "PROCESSING",
-          message:
-            "Preferences submitted successfully. Story generation has been initiated.",
-          estimatedCompletionTime: "2-3 minutes",
+          message: "Preferences saved successfully",
+          preferences: validPreferences,
+          insights: mockInsights,
         },
       });
 
-      // Verify all operations were called
-      expect(mockGenerationRequestAccess.create).toHaveBeenCalledWith({
-        requestId: "test-request-id-123",
-        userId: "test-user-123",
-        type: "STORY",
-        status: "PENDING",
-        createdAt: expect.any(String),
-      });
-
+      // Verify preferences were stored
       expect(mockUserPreferencesAccess.create).toHaveBeenCalledWith(
         "test-user-123",
         {
@@ -243,25 +334,19 @@ describe("Preferences Processing Lambda", () => {
         }
       );
 
-      expect(
-        mockEventPublishingHelpers.publishStoryGeneration
-      ).toHaveBeenCalledWith(
-        "test-user-123",
-        "test-request-id-123",
-        validPreferences,
-        mockInsights
-      );
+      // Verify EventBridge integration is NOT called (removed functionality)
+      // No assertions for EventPublishingHelpers or GenerationRequestAccess
     });
   });
 
-  describe("Error Handling", () => {
+  describe("POST Endpoint - Error Handling", () => {
     it("should handle Qloo API errors", async () => {
       const mockQlooInstance = {
         fetchInsights: jest.fn().mockRejectedValue(new Error("Qloo API error")),
       };
       mockQlooApiClient.mockImplementation(() => mockQlooInstance as any);
 
-      const event = createMockEvent(JSON.stringify(validPreferences));
+      const event = createMockEvent("POST", JSON.stringify(validPreferences));
 
       const result = await handler(event, mockContext);
 
@@ -273,16 +358,6 @@ describe("Preferences Processing Lambda", () => {
             "Failed to process user preferences. Please try again later.",
         },
       });
-
-      // Verify request status was updated to failed
-      expect(mockGenerationRequestAccess.updateStatus).toHaveBeenCalledWith(
-        "test-user-123",
-        "test-request-id-123",
-        "FAILED",
-        {
-          errorMessage: "Failed to fetch user insights from Qloo API",
-        }
-      );
     });
 
     it("should handle database errors when storing preferences", async () => {
@@ -290,7 +365,7 @@ describe("Preferences Processing Lambda", () => {
         new Error("Database error")
       );
 
-      const event = createMockEvent(JSON.stringify(validPreferences));
+      const event = createMockEvent("POST", JSON.stringify(validPreferences));
 
       const result = await handler(event, mockContext);
 
@@ -301,69 +376,12 @@ describe("Preferences Processing Lambda", () => {
           message: "Failed to save preferences. Please try again later.",
         },
       });
-
-      // Verify request status was updated to failed
-      expect(mockGenerationRequestAccess.updateStatus).toHaveBeenCalledWith(
-        "test-user-123",
-        "test-request-id-123",
-        "FAILED",
-        {
-          errorMessage: "Failed to store user preferences",
-        }
-      );
-    });
-
-    it("should handle event publishing errors", async () => {
-      mockEventPublishingHelpers.publishStoryGeneration.mockRejectedValue(
-        new Error("Event publishing error")
-      );
-
-      const event = createMockEvent(JSON.stringify(validPreferences));
-
-      const result = await handler(event, mockContext);
-
-      expect(result.statusCode).toBe(500);
-      expect(JSON.parse(result.body)).toMatchObject({
-        error: {
-          code: "EVENT_PUBLISHING_ERROR",
-          message:
-            "Failed to initiate story generation. Please try again later.",
-        },
-      });
-
-      // Verify request status was updated to failed
-      expect(mockGenerationRequestAccess.updateStatus).toHaveBeenCalledWith(
-        "test-user-123",
-        "test-request-id-123",
-        "FAILED",
-        {
-          errorMessage: "Failed to initiate story generation",
-        }
-      );
-    });
-
-    it("should handle unexpected errors", async () => {
-      mockGenerationRequestAccess.create.mockRejectedValue(
-        new Error("Unexpected error")
-      );
-
-      const event = createMockEvent(JSON.stringify(validPreferences));
-
-      const result = await handler(event, mockContext);
-
-      expect(result.statusCode).toBe(500);
-      expect(JSON.parse(result.body)).toMatchObject({
-        error: {
-          code: "INTERNAL_ERROR",
-          message: "An unexpected error occurred. Please try again later.",
-        },
-      });
     });
   });
 
   describe("CORS Headers", () => {
     it("should include CORS headers in all responses", async () => {
-      const event = createMockEvent(JSON.stringify(validPreferences));
+      const event = createMockEvent("GET", null, "unique-user-for-cors-test");
 
       const result = await handler(event, mockContext);
 
