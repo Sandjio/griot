@@ -225,12 +225,14 @@ const handleGetPreferences = async (
       requestId: event.requestContext.requestId,
     });
 
-    // Retrieve latest preferences from DynamoDB
+    // Retrieve latest preferences with metadata from DynamoDB
     const dbTimer = new PerformanceTimer("DynamoDB-GetPreferences");
-    const userPreferences = await UserPreferencesAccess.getLatest(userId);
+    const preferencesData = await UserPreferencesAccess.getLatestWithMetadata(
+      userId
+    );
     const dbDuration = dbTimer.stop();
 
-    if (!userPreferences) {
+    if (!preferencesData.preferences) {
       // User has no stored preferences - return empty response
       ErrorLogger.logInfo("No preferences found for user", {
         userId,
@@ -264,9 +266,9 @@ const handleGetPreferences = async (
     // Return preferences with insights and metadata
     return createSuccessResponse(
       {
-        preferences: userPreferences.preferences,
-        insights: userPreferences.insights,
-        lastUpdated: userPreferences.createdAt,
+        preferences: preferencesData.preferences,
+        insights: preferencesData.insights,
+        lastUpdated: preferencesData.lastUpdated,
       },
       200,
       event.requestContext.requestId

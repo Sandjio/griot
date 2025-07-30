@@ -131,9 +131,11 @@ describe("Preferences Processing Lambda", () => {
 
     // Setup default mocks
     mockUserPreferencesAccess.create.mockResolvedValue();
-    mockUserPreferencesAccess.getLatest.mockResolvedValue(
-      mockUserPreferencesData
-    );
+    mockUserPreferencesAccess.getLatestWithMetadata.mockResolvedValue({
+      preferences: mockUserPreferencesData.preferences,
+      insights: mockUserPreferencesData.insights,
+      lastUpdated: mockUserPreferencesData.createdAt,
+    });
 
     const mockQlooInstance = {
       fetchInsights: jest.fn().mockResolvedValue(mockInsights),
@@ -200,9 +202,9 @@ describe("Preferences Processing Lambda", () => {
       const result = await handler(event, mockContext);
 
       expect(result.statusCode).toBe(200);
-      expect(mockUserPreferencesAccess.getLatest).toHaveBeenCalledWith(
-        "test-user-123"
-      );
+      expect(
+        mockUserPreferencesAccess.getLatestWithMetadata
+      ).toHaveBeenCalledWith("test-user-123");
 
       const responseBody = JSON.parse(result.body);
       expect(responseBody).toMatchObject({
@@ -216,15 +218,17 @@ describe("Preferences Processing Lambda", () => {
     });
 
     it("should return empty response when user has no preferences", async () => {
-      mockUserPreferencesAccess.getLatest.mockResolvedValue(null);
+      mockUserPreferencesAccess.getLatestWithMetadata.mockResolvedValue({
+        preferences: null,
+      });
       const event = createMockEvent("GET");
 
       const result = await handler(event, mockContext);
 
       expect(result.statusCode).toBe(200);
-      expect(mockUserPreferencesAccess.getLatest).toHaveBeenCalledWith(
-        "test-user-123"
-      );
+      expect(
+        mockUserPreferencesAccess.getLatestWithMetadata
+      ).toHaveBeenCalledWith("test-user-123");
 
       const responseBody = JSON.parse(result.body);
       expect(responseBody).toMatchObject({
@@ -237,7 +241,7 @@ describe("Preferences Processing Lambda", () => {
     });
 
     it("should handle database errors when retrieving preferences", async () => {
-      mockUserPreferencesAccess.getLatest.mockRejectedValue(
+      mockUserPreferencesAccess.getLatestWithMetadata.mockRejectedValue(
         new Error("Database error")
       );
       const event = createMockEvent("GET");
