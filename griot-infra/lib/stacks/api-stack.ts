@@ -536,7 +536,6 @@ export class ApiStack extends cdk.Stack {
       environment: {
         MANGA_TABLE_NAME: props.mangaTable.tableName,
         CONTENT_BUCKET_NAME: props.contentBucket.bucketName,
-        EVENT_BUS_NAME: props.eventBus.eventBusName,
         ENVIRONMENT: props.environment,
         QLOO_API_KEY: process.env.QLOO_API_KEY!,
         QLOO_API_URL: process.env.QLOO_API_URL!,

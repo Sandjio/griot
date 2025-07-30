@@ -133,16 +133,16 @@
     - Test error scenarios for both endpoints
     - _Requirements: 1.1, 2.1, 4.1, 5.1_
 
-- [ ] 9. Update environment configuration and deployment
+- [x] 9. Update environment configuration and deployment
 
-  - [ ] 9.1 Update lambda environment variables
+  - [x] 9.1 Update lambda environment variables
 
     - Remove EventBridge-related environment variables if no longer needed
     - Verify all required environment variables for GET functionality
     - Update environment configuration in CDK stack
     - _Requirements: 4.4, 4.5_
 
-  - [ ] 9.2 Update CDK infrastructure code
+  - [x] 9.2 Update CDK infrastructure code
 
     - Add GET method configuration to API Gateway in api-stack.ts
     - Update lambda function permissions in security-construct.ts
