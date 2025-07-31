@@ -1,11 +1,19 @@
-# Griot - Manga Generation Platform
+# Griot - AI-Powered Manga Generation Platform
 
-Griot is a comprehensive manga generation platform that allows users to create personalized manga content based on their preferences.
+_Qloo Global Hackathon Submission_
+
+Griot is an intelligent manga generation platform that combines Large Language Models (LLMs) with Qloo's Taste AI™ API to create deeply personalized manga content. By leveraging Qloo's cultural intelligence and consumer behavior insights, Griot understands user preferences across entertainment, lifestyle, and cultural domains to generate manga stories that truly resonate with individual tastes.
 
 ## Documentation
 
 - [API Documentation](docs/API.md) - Complete API reference for all endpoints
 - [Deployment Guide](griot-infra/DEPLOYMENT.md) - Infrastructure deployment instructions
+
+## Hackathon Integration
+
+**LLM Integration**: Utilizes advanced language models (Claude) for manga story generation and narrative creation.
+
+**Qloo's Taste AI™**: Leverages Qloo's cultural intelligence API to understand user preferences across music, TV, dining, fashion, travel, and entertainment to inform manga content generation.
 
 ## Architecture
 
@@ -15,15 +23,17 @@ The platform consists of:
 - **Backend**: AWS Lambda functions for API processing
 - **Infrastructure**: AWS CDK for infrastructure as code
 - **Database**: DynamoDB for data storage
-- **External APIs**: Qloo API for personalized insights
+- **Cultural Intelligence**: Qloo's Taste AI™ API for deep preference insights
+- **Content Generation**: LLM integration for personalized manga creation
 
 ## Key Features
 
-- User authentication with AWS Cognito
-- Preferences collection and storage
-- Personalized manga generation
-- Real-time monitoring and logging
-- Scalable serverless architecture
+- **Cultural Intelligence**: Qloo's Taste AI™ integration for understanding user preferences across multiple domains
+- **LLM-Powered Generation**: Advanced language models create personalized manga narratives
+- **Privacy-First**: No personal identifying data required - powered by cultural preferences
+- **Cross-Domain Insights**: Connects user interests from music, entertainment, lifestyle to manga content
+- **Scalable Architecture**: Serverless AWS infrastructure with real-time processing
+- **Personalized Storytelling**: Generates manga content that reflects individual cultural tastes
 
 ## API Endpoints
 
