@@ -186,7 +186,7 @@
   - Write unit tests for batch workflow orchestration
   - _Requirements: 6A.1, 6A.2, 6A.3, 6A.4, 6A.5_
 
-- [ ] 22. Create API endpoint for batch workflow initiation
+- [x] 22. Create API endpoint for batch workflow initiation
 
   - Add POST /workflow/start endpoint to API Gateway configuration
   - Implement request validation for numberOfStories parameter

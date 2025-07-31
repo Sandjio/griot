@@ -515,6 +515,77 @@ export class ApiStack extends cdk.Stack {
       }
     );
 
+    // Workflow Start Request Model
+    const workflowStartRequestModel = this.api.addModel(
+      "WorkflowStartRequestModel",
+      {
+        modelName: "WorkflowStartRequest",
+        contentType: "application/json",
+        schema: {
+          type: apigateway.JsonSchemaType.OBJECT,
+          properties: {
+            numberOfStories: {
+              type: apigateway.JsonSchemaType.NUMBER,
+              minimum: 1,
+              maximum: 10,
+            },
+            batchSize: {
+              type: apigateway.JsonSchemaType.NUMBER,
+              minimum: 1,
+              maximum: 5,
+            },
+          },
+          required: ["numberOfStories"],
+          additionalProperties: false,
+        },
+      }
+    );
+
+    // Workflow Start Response Model
+    const workflowStartResponseModel = this.api.addModel(
+      "WorkflowStartResponseModel",
+      {
+        modelName: "WorkflowStartResponse",
+        contentType: "application/json",
+        schema: {
+          type: apigateway.JsonSchemaType.OBJECT,
+          properties: {
+            workflowId: {
+              type: apigateway.JsonSchemaType.STRING,
+            },
+            requestId: {
+              type: apigateway.JsonSchemaType.STRING,
+            },
+            numberOfStories: {
+              type: apigateway.JsonSchemaType.NUMBER,
+            },
+            status: {
+              type: apigateway.JsonSchemaType.STRING,
+              enum: ["STARTED"],
+            },
+            estimatedCompletionTime: {
+              type: apigateway.JsonSchemaType.STRING,
+            },
+            message: {
+              type: apigateway.JsonSchemaType.STRING,
+            },
+            timestamp: {
+              type: apigateway.JsonSchemaType.STRING,
+            },
+          },
+          required: [
+            "workflowId",
+            "requestId",
+            "numberOfStories",
+            "status",
+            "estimatedCompletionTime",
+            "message",
+            "timestamp",
+          ],
+        },
+      }
+    );
+
     // Preferences Processing Lambda function with security configuration
     const preferencesLambda = new NodejsFunction(this, "PreferencesLambda", {
       functionName: `manga-preferences-${props.environment}`,
@@ -753,6 +824,8 @@ export class ApiStack extends cdk.Stack {
     const episodeResource = episodesResource.addResource("{episodeId}");
     const statusResource = this.api.root.addResource("status");
     const statusRequestResource = statusResource.addResource("{requestId}");
+    const workflowResource = this.api.root.addResource("workflow");
+    const workflowStartResource = workflowResource.addResource("start");
 
     // Content Retrieval Lambda function with security configuration
     const contentRetrievalLambda = new lambda.Function(
@@ -790,6 +863,54 @@ export class ApiStack extends cdk.Stack {
 
     // Store Lambda function reference
     this.lambdaFunctions.contentRetrieval = contentRetrievalLambda;
+
+    // Workflow Orchestration Lambda function with security configuration
+    const workflowOrchestrationLambda = new NodejsFunction(
+      this,
+      "WorkflowOrchestrationLambda",
+      {
+        functionName: `manga-workflow-orchestration-${props.environment}`,
+        runtime: lambda.Runtime.NODEJS_20_X,
+        handler: "handler",
+        entry: path.join(
+          __dirname,
+          "../../..",
+          "/src/lambdas/workflow-orchestration/index.ts"
+        ),
+        role: this.securityConstruct.workflowOrchestrationRole,
+        bundling: {
+          minify: true,
+          sourceMap: true,
+          target: "node20",
+          externalModules: ["aws-sdk"],
+        },
+        projectRoot: path.join(__dirname, "../../.."),
+        environment: {
+          MANGA_TABLE_NAME: props.mangaTable.tableName,
+          EVENT_BUS_NAME: props.eventBus.eventBusName,
+          ENVIRONMENT: props.environment,
+          // Security-related environment variables
+          ENABLE_SECURITY_LOGGING: "true",
+          SECURITY_CONTEXT: "workflowOrchestration",
+        },
+        timeout: cdk.Duration.seconds(30),
+        memorySize: 512,
+        // Enable X-Ray tracing
+        tracing: lambda.Tracing.ACTIVE,
+        // VPC configuration if provided
+        ...(props.vpc
+          ? {
+              vpc: props.vpc,
+              vpcSubnets: {
+                subnets: props.vpc.privateSubnets,
+              },
+            }
+          : {}),
+      }
+    );
+
+    // Store Lambda function reference
+    this.lambdaFunctions.workflowOrchestration = workflowOrchestrationLambda;
 
     // Add methods with proper validation and response models
     storiesResource.addMethod(
@@ -934,6 +1055,119 @@ export class ApiStack extends cdk.Stack {
           },
           {
             statusCode: "404",
+            responseModels: {
+              "application/json": errorResponseModel,
+            },
+          },
+          {
+            statusCode: "500",
+            responseModels: {
+              "application/json": errorResponseModel,
+            },
+          },
+        ],
+      }
+    );
+
+    // POST /workflow/start endpoint for batch workflow initiation
+    workflowStartResource.addMethod(
+      "POST",
+      new apigateway.LambdaIntegration(workflowOrchestrationLambda, {
+        proxy: true,
+        integrationResponses: [
+          {
+            statusCode: "202",
+            responseTemplates: {
+              "application/json": "",
+            },
+          },
+          {
+            statusCode: "400",
+            selectionPattern: "4\\d{2}",
+            responseTemplates: {
+              "application/json": JSON.stringify({
+                error: {
+                  code: "VALIDATION_ERROR",
+                  message: "Invalid request format",
+                  requestId: "$context.requestId",
+                  timestamp: "$context.requestTime",
+                },
+              }),
+            },
+          },
+          {
+            statusCode: "401",
+            selectionPattern: "401",
+            responseTemplates: {
+              "application/json": JSON.stringify({
+                error: {
+                  code: "UNAUTHORIZED",
+                  message: "Authentication required",
+                  requestId: "$context.requestId",
+                  timestamp: "$context.requestTime",
+                },
+              }),
+            },
+          },
+          {
+            statusCode: "429",
+            selectionPattern: "429",
+            responseTemplates: {
+              "application/json": JSON.stringify({
+                error: {
+                  code: "RATE_LIMIT_EXCEEDED",
+                  message:
+                    "Too many workflow requests. Please try again later.",
+                  requestId: "$context.requestId",
+                  timestamp: "$context.requestTime",
+                },
+              }),
+            },
+          },
+          {
+            statusCode: "500",
+            selectionPattern: "5\\d{2}",
+            responseTemplates: {
+              "application/json": JSON.stringify({
+                error: {
+                  code: "INTERNAL_ERROR",
+                  message: "Internal server error",
+                  requestId: "$context.requestId",
+                  timestamp: "$context.requestTime",
+                },
+              }),
+            },
+          },
+        ],
+      }),
+      {
+        authorizer,
+        authorizationType: apigateway.AuthorizationType.COGNITO,
+        requestValidator,
+        requestModels: {
+          "application/json": workflowStartRequestModel,
+        },
+        methodResponses: [
+          {
+            statusCode: "202",
+            responseModels: {
+              "application/json": workflowStartResponseModel,
+            },
+          },
+          {
+            statusCode: "400",
+            responseModels: {
+              "application/json": errorResponseModel,
+            },
+          },
+          {
+            statusCode: "401",
+            responseModels: {
+              "application/json": errorResponseModel,
+            },
+          },
+          {
+            statusCode: "429",
             responseModels: {
               "application/json": errorResponseModel,
             },

@@ -31,6 +31,7 @@ export class SecurityConstruct extends Construct {
   public readonly imageGenerationRole: iam.Role;
   public readonly contentRetrievalRole: iam.Role;
   public readonly statusCheckRole: iam.Role;
+  public readonly workflowOrchestrationRole: iam.Role;
   public readonly vpcEndpoints: { [key: string]: ec2.VpcEndpoint } = {};
 
   constructor(scope: Construct, id: string, props: SecurityConstructProps) {
@@ -788,6 +789,54 @@ export class SecurityConstruct extends Construct {
       // },
     });
     (this as { statusCheckRole: iam.Role }).statusCheckRole = statusCheckRole;
+
+    // Workflow Orchestration Role
+    const workflowOrchestrationRole = new iam.Role(
+      this,
+      "WorkflowOrchestrationRole",
+      {
+        roleName: `manga-workflow-orchestration-role-${props.environment}`,
+        assumedBy: new iam.ServicePrincipal("lambda.amazonaws.com"),
+        description: "IAM role for Workflow Orchestration Lambda",
+        inlinePolicies: {
+          BasePolicy: baseLambdaPolicy,
+          DynamoDBPolicy: new iam.PolicyDocument({
+            statements: [
+              new iam.PolicyStatement({
+                effect: iam.Effect.ALLOW,
+                actions: [
+                  "dynamodb:PutItem",
+                  "dynamodb:GetItem",
+                  "dynamodb:UpdateItem",
+                  "dynamodb:Query",
+                ],
+                resources: [
+                  props.mangaTable.tableArn,
+                  `${props.mangaTable.tableArn}/index/*`,
+                ],
+              }),
+            ],
+          }),
+          EventBridgePolicy: new iam.PolicyDocument({
+            statements: [
+              new iam.PolicyStatement({
+                effect: iam.Effect.ALLOW,
+                actions: ["events:PutEvents"],
+                resources: [props.eventBus.eventBusArn],
+                conditions: {
+                  StringEquals: {
+                    "events:source": ["manga.workflow", "manga.generation"],
+                  },
+                },
+              }),
+            ],
+          }),
+        },
+      }
+    );
+    (
+      this as { workflowOrchestrationRole: iam.Role }
+    ).workflowOrchestrationRole = workflowOrchestrationRole;
   }
 
   /**
@@ -852,6 +901,7 @@ export class SecurityConstruct extends Construct {
       | "imageGeneration"
       | "contentRetrieval"
       | "statusCheck"
+      | "workflowOrchestration"
   ): void {
     // Get the appropriate role based on function type
     let role: iam.Role;
@@ -876,6 +926,9 @@ export class SecurityConstruct extends Construct {
         break;
       case "statusCheck":
         role = this.statusCheckRole;
+        break;
+      case "workflowOrchestration":
+        role = this.workflowOrchestrationRole;
         break;
       default:
         throw new Error(`Unknown function type: ${functionType}`);
@@ -910,6 +963,7 @@ export class SecurityConstruct extends Construct {
       | "imageGeneration"
       | "contentRetrieval"
       | "statusCheck"
+      | "workflowOrchestration"
   ): iam.Role {
     switch (functionType) {
       case "postAuth":
@@ -926,6 +980,8 @@ export class SecurityConstruct extends Construct {
         return this.contentRetrievalRole;
       case "statusCheck":
         return this.statusCheckRole;
+      case "workflowOrchestration":
+        return this.workflowOrchestrationRole;
       default:
         throw new Error(`Unknown function type: ${functionType}`);
     }
