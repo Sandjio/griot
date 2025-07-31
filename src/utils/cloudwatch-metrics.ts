@@ -45,6 +45,10 @@ export const BUSINESS_METRICS = {
   USER_REGISTRATIONS: "UserRegistrations",
   PREFERENCE_SUBMISSIONS: "PreferenceSubmissions",
   CONTENT_RETRIEVALS: "ContentRetrievals",
+  WORKFLOW_STARTS: "WorkflowStarts",
+  WORKFLOW_COMPLETIONS: "WorkflowCompletions",
+  WORKFLOW_FAILURES: "WorkflowFailures",
+  BATCH_STORY_GENERATIONS: "BatchStoryGenerations",
 } as const;
 
 export const PERFORMANCE_METRICS = {
@@ -484,6 +488,65 @@ export class BusinessMetrics {
       1,
       "Count",
       { UserId: userId, ContentType: contentType }
+    );
+  }
+
+  // Workflow Metrics
+  static async recordWorkflowStart(
+    userId: string,
+    numberOfStories: number
+  ): Promise<void> {
+    await Promise.all([
+      this.metrics.publishMetric(
+        METRIC_NAMESPACES.BUSINESS,
+        BUSINESS_METRICS.WORKFLOW_STARTS,
+        1,
+        "Count",
+        { UserId: userId }
+      ),
+      this.metrics.publishMetric(
+        METRIC_NAMESPACES.BUSINESS,
+        BUSINESS_METRICS.BATCH_STORY_GENERATIONS,
+        numberOfStories,
+        "Count",
+        { UserId: userId }
+      ),
+    ]);
+  }
+
+  static async recordWorkflowCompletion(
+    userId: string,
+    duration: number,
+    numberOfStories: number
+  ): Promise<void> {
+    await Promise.all([
+      this.metrics.publishMetric(
+        METRIC_NAMESPACES.BUSINESS,
+        BUSINESS_METRICS.WORKFLOW_COMPLETIONS,
+        1,
+        "Count",
+        { UserId: userId }
+      ),
+      this.metrics.publishMetric(
+        METRIC_NAMESPACES.PERFORMANCE,
+        "WorkflowDuration",
+        duration,
+        "Milliseconds",
+        { UserId: userId, NumberOfStories: numberOfStories.toString() }
+      ),
+    ]);
+  }
+
+  static async recordWorkflowFailure(
+    userId: string,
+    errorType: string
+  ): Promise<void> {
+    await this.metrics.publishMetric(
+      METRIC_NAMESPACES.BUSINESS,
+      BUSINESS_METRICS.WORKFLOW_FAILURES,
+      1,
+      "Count",
+      { UserId: userId, ErrorType: errorType }
     );
   }
 }

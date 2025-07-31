@@ -79,13 +79,46 @@ export interface UserRegistrationEvent extends BaseEvent {
   };
 }
 
+// Batch Workflow Event
+export interface BatchWorkflowEvent extends BaseEvent {
+  source: "manga.workflow";
+  "detail-type": "Batch Story Generation Requested";
+  detail: {
+    userId: string;
+    workflowId: string;
+    requestId: string;
+    numberOfStories: number;
+    currentBatch: number;
+    totalBatches: number;
+    preferences: UserPreferencesData;
+    insights: QlooInsights;
+    timestamp: string;
+  };
+}
+
+// Continue Episode Event
+export interface ContinueEpisodeEvent extends BaseEvent {
+  source: "manga.story";
+  "detail-type": "Continue Episode Requested";
+  detail: {
+    userId: string;
+    storyId: string;
+    nextEpisodeNumber: number;
+    originalPreferences: UserPreferencesData;
+    storyS3Key: string;
+    timestamp: string;
+  };
+}
+
 // Event Type Union
 export type MangaPlatformEvent =
   | StoryGenerationEvent
   | EpisodeGenerationEvent
   | ImageGenerationEvent
   | GenerationStatusEvent
-  | UserRegistrationEvent;
+  | UserRegistrationEvent
+  | BatchWorkflowEvent
+  | ContinueEpisodeEvent;
 
 // Event Detail Types for easier access
 export type StoryGenerationEventDetail = StoryGenerationEvent["detail"];
@@ -93,3 +126,5 @@ export type EpisodeGenerationEventDetail = EpisodeGenerationEvent["detail"];
 export type ImageGenerationEventDetail = ImageGenerationEvent["detail"];
 export type GenerationStatusEventDetail = GenerationStatusEvent["detail"];
 export type UserRegistrationEventDetail = UserRegistrationEvent["detail"];
+export type BatchWorkflowEventDetail = BatchWorkflowEvent["detail"];
+export type ContinueEpisodeEventDetail = ContinueEpisodeEvent["detail"];
