@@ -16,6 +16,10 @@ import {
   Episode,
   GenerationRequest,
   GenerationStatus,
+  BatchWorkflow,
+  BatchWorkflowStatus,
+  EpisodeContinuation,
+  EpisodeContinuationStatus,
 } from "../types/data-models";
 
 /**
@@ -559,6 +563,321 @@ export class GenerationRequestAccess {
   }
 }
 
+// Batch Workflow Operations
+export class BatchWorkflowAccess {
+  static async create(
+    workflow: Omit<BatchWorkflow, "PK" | "SK" | "GSI1PK" | "GSI1SK" | "GSI2PK" | "GSI2SK">
+  ): Promise<void> {
+    const command = new PutCommand({
+      TableName: TABLE_NAME,
+      Item: {
+        PK: `USER#${workflow.userId}` as const,
+        SK: `WORKFLOW#${workflow.workflowId}` as const,
+        GSI1PK: `WORKFLOW#${workflow.workflowId}` as const,
+        GSI1SK: "METADATA" as const,
+        GSI2PK: `STATUS#${workflow.status}` as const,
+        GSI2SK: workflow.createdAt,
+        ...workflow,
+      },
+    });
+
+    await docClient.send(command);
+  }
+
+  static async get(userId: string, workflowId: string): Promise<BatchWorkflow | null> {
+    const command = new GetCommand({
+      TableName: TABLE_NAME,
+      Key: {
+        PK: `USER#${userId}`,
+        SK: `WORKFLOW#${workflowId}`,
+      },
+    });
+
+    const result = await docClient.send(command);
+    return (result.Item as BatchWorkflow) || null;
+  }
+
+  static async getByWorkflowId(workflowId: string): Promise<BatchWorkflow | null> {
+    const command = new QueryCommand({
+      TableName: TABLE_NAME,
+      IndexName: "GSI1",
+      KeyConditionExpression: "GSI1PK = :gsi1pk AND GSI1SK = :gsi1sk",
+      ExpressionAttributeValues: {
+        ":gsi1pk": `WORKFLOW#${workflowId}`,
+        ":gsi1sk": "METADATA",
+      },
+    });
+
+    const result = await docClient.send(command);
+    return (result.Items?.[0] as BatchWorkflow) || null;
+  }
+
+  static async updateProgress(
+    userId: string,
+    workflowId: string,
+    completedStories: number,
+    failedStories: number,
+    status?: BatchWorkflowStatus,
+    additionalFields?: Record<string, any>
+  ): Promise<void> {
+    const updateExpression = [
+      "completedStories = :completedStories",
+      "failedStories = :failedStories",
+      "updatedAt = :updatedAt",
+    ];
+    const expressionAttributeValues: Record<string, any> = {
+      ":completedStories": completedStories,
+      ":failedStories": failedStories,
+      ":updatedAt": new Date().toISOString(),
+    };
+    const expressionAttributeNames: Record<string, string> = {};
+
+    if (status) {
+      updateExpression.push("#status = :status", "GSI2PK = :gsi2pk");
+      expressionAttributeNames["#status"] = "status";
+      expressionAttributeValues[":status"] = status;
+      expressionAttributeValues[":gsi2pk"] = `STATUS#${status}`;
+    }
+
+    if (additionalFields) {
+      for (const [key, value] of Object.entries(additionalFields)) {
+        updateExpression.push(`#${key} = :${key}`);
+        expressionAttributeNames[`#${key}`] = key;
+        expressionAttributeValues[`:${key}`] = value;
+      }
+    }
+
+    const command = new UpdateCommand({
+      TableName: TABLE_NAME,
+      Key: {
+        PK: `USER#${userId}`,
+        SK: `WORKFLOW#${workflowId}`,
+      },
+      UpdateExpression: `SET ${updateExpression.join(", ")}`,
+      ExpressionAttributeNames: Object.keys(expressionAttributeNames).length > 0 ? expressionAttributeNames : undefined,
+      ExpressionAttributeValues: expressionAttributeValues,
+    });
+
+    await docClient.send(command);
+  }
+
+  static async getUserWorkflows(userId: string, limit = 20): Promise<BatchWorkflow[]> {
+    const command = new QueryCommand({
+      TableName: TABLE_NAME,
+      KeyConditionExpression: "PK = :pk AND begins_with(SK, :sk)",
+      ExpressionAttributeValues: {
+        ":pk": `USER#${userId}`,
+        ":sk": "WORKFLOW#",
+      },
+      ScanIndexForward: false,
+      Limit: limit,
+    });
+
+    const result = await docClient.send(command);
+    return (result.Items as BatchWorkflow[]) || [];
+  }
+
+  static async getWorkflowsByStatus(
+    status: BatchWorkflowStatus,
+    limit = 50
+  ): Promise<BatchWorkflow[]> {
+    const command = new QueryCommand({
+      TableName: TABLE_NAME,
+      IndexName: "GSI2",
+      KeyConditionExpression: "GSI2PK = :gsi2pk",
+      ExpressionAttributeValues: {
+        ":gsi2pk": `STATUS#${status}`,
+      },
+      ScanIndexForward: false,
+      Limit: limit,
+    });
+
+    const result = await docClient.send(command);
+    return (result.Items as BatchWorkflow[]) || [];
+  }
+}
+
+// Episode Continuation Operations
+export class EpisodeContinuationAccess {
+  static async create(
+    continuation: Omit<EpisodeContinuation, "PK" | "SK" | "GSI1PK" | "GSI1SK" | "GSI2PK" | "GSI2SK">
+  ): Promise<void> {
+    const command = new PutCommand({
+      TableName: TABLE_NAME,
+      Item: {
+        PK: `STORY#${continuation.storyId}` as const,
+        SK: `CONTINUATION#${continuation.continuationId}` as const,
+        GSI1PK: `CONTINUATION#${continuation.continuationId}` as const,
+        GSI1SK: "METADATA" as const,
+        GSI2PK: `STATUS#${continuation.status}` as const,
+        GSI2SK: continuation.createdAt,
+        ...continuation,
+      },
+    });
+
+    await docClient.send(command);
+  }
+
+  static async get(
+    storyId: string,
+    continuationId: string
+  ): Promise<EpisodeContinuation | null> {
+    const command = new GetCommand({
+      TableName: TABLE_NAME,
+      Key: {
+        PK: `STORY#${storyId}`,
+        SK: `CONTINUATION#${continuationId}`,
+      },
+    });
+
+    const result = await docClient.send(command);
+    return (result.Item as EpisodeContinuation) || null;
+  }
+
+  static async getByContinuationId(
+    continuationId: string
+  ): Promise<EpisodeContinuation | null> {
+    const command = new QueryCommand({
+      TableName: TABLE_NAME,
+      IndexName: "GSI1",
+      KeyConditionExpression: "GSI1PK = :gsi1pk AND GSI1SK = :gsi1sk",
+      ExpressionAttributeValues: {
+        ":gsi1pk": `CONTINUATION#${continuationId}`,
+        ":gsi1sk": "METADATA",
+      },
+    });
+
+    const result = await docClient.send(command);
+    return (result.Items?.[0] as EpisodeContinuation) || null;
+  }
+
+  static async getStoryContinuations(storyId: string): Promise<EpisodeContinuation[]> {
+    const command = new QueryCommand({
+      TableName: TABLE_NAME,
+      KeyConditionExpression: "PK = :pk AND begins_with(SK, :sk)",
+      ExpressionAttributeValues: {
+        ":pk": `STORY#${storyId}`,
+        ":sk": "CONTINUATION#",
+      },
+      ScanIndexForward: false,
+    });
+
+    const result = await docClient.send(command);
+    return (result.Items as EpisodeContinuation[]) || [];
+  }
+
+  static async updateStatus(
+    storyId: string,
+    continuationId: string,
+    status: EpisodeContinuationStatus,
+    additionalFields?: Record<string, any>
+  ): Promise<void> {
+    const updateExpression = [
+      "#status = :status",
+      "updatedAt = :updatedAt",
+      "GSI2PK = :gsi2pk",
+    ];
+    const expressionAttributeNames: Record<string, string> = {
+      "#status": "status",
+    };
+    const expressionAttributeValues: Record<string, any> = {
+      ":status": status,
+      ":updatedAt": new Date().toISOString(),
+      ":gsi2pk": `STATUS#${status}`,
+    };
+
+    if (additionalFields) {
+      for (const [key, value] of Object.entries(additionalFields)) {
+        updateExpression.push(`#${key} = :${key}`);
+        expressionAttributeNames[`#${key}`] = key;
+        expressionAttributeValues[`:${key}`] = value;
+      }
+    }
+
+    const command = new UpdateCommand({
+      TableName: TABLE_NAME,
+      Key: {
+        PK: `STORY#${storyId}`,
+        SK: `CONTINUATION#${continuationId}`,
+      },
+      UpdateExpression: `SET ${updateExpression.join(", ")}`,
+      ExpressionAttributeNames: expressionAttributeNames,
+      ExpressionAttributeValues: expressionAttributeValues,
+    });
+
+    await docClient.send(command);
+  }
+
+  static async getNextEpisodeNumber(storyId: string): Promise<number> {
+    const episodes = await EpisodeAccess.getStoryEpisodes(storyId);
+    if (episodes.length === 0) {
+      return 1;
+    }
+    const maxEpisodeNumber = Math.max(...episodes.map(ep => ep.episodeNumber));
+    return maxEpisodeNumber + 1;
+  }
+}
+
+// Enhanced User Preferences Access for Batch Workflows
+export class BatchUserPreferencesAccess extends UserPreferencesAccess {
+  static async getPreferencesForStoryGeneration(
+    userId: string
+  ): Promise<{
+    preferences: UserPreferencesData;
+    insights?: QlooInsights;
+    lastUpdated: string;
+  } | null> {
+    try {
+      const result = await this.getLatestWithMetadata(userId);
+      
+      if (!result.preferences) {
+        return null;
+      }
+
+      return {
+        preferences: result.preferences,
+        insights: result.insights,
+        lastUpdated: result.lastUpdated || new Date().toISOString(),
+      };
+    } catch (error) {
+      console.error("Error retrieving preferences for story generation:", error);
+      throw new Error("Failed to retrieve user preferences for story generation");
+    }
+  }
+
+  static async batchGetUserPreferences(
+    userIds: string[]
+  ): Promise<Record<string, { preferences: UserPreferencesData; insights?: QlooInsights }>> {
+    if (userIds.length === 0) return {};
+
+    const keys = userIds.map(userId => ({
+      PK: `USER#${userId}`,
+      SK: "PREFERENCES#", // This will need to be handled differently for latest
+    }));
+
+    // For batch operations, we'll need to query each user individually for latest preferences
+    const results: Record<string, { preferences: UserPreferencesData; insights?: QlooInsights }> = {};
+    
+    await Promise.all(
+      userIds.map(async (userId) => {
+        try {
+          const latest = await this.getLatest(userId);
+          if (latest) {
+            results[userId] = {
+              preferences: latest.preferences,
+              insights: latest.insights,
+            };
+          }
+        } catch (error) {
+          console.error(`Error fetching preferences for user ${userId}:`, error);
+        }
+      })
+    );
+
+    return results;
+  }
+}
+
 // Batch Operations for efficiency
 export class BatchOperations {
   static async batchGetItems(
@@ -591,5 +910,64 @@ export class BatchOperations {
     const episodes = await EpisodeAccess.getStoryEpisodes(storyId);
 
     return { story, episodes };
+  }
+
+  static async getWorkflowProgress(
+    workflowId: string
+  ): Promise<{
+    workflow: BatchWorkflow | null;
+    stories: Story[];
+    totalProgress: number;
+  }> {
+    const workflow = await BatchWorkflowAccess.getByWorkflowId(workflowId);
+    if (!workflow) {
+      return { workflow: null, stories: [], totalProgress: 0 };
+    }
+
+    const stories = await StoryAccess.getUserStories(workflow.userId);
+    const workflowStories = stories.filter(story => 
+      story.createdAt >= workflow.createdAt
+    ).slice(0, workflow.numberOfStories);
+
+    const totalProgress = workflow.numberOfStories > 0 
+      ? (workflow.completedStories + workflow.failedStories) / workflow.numberOfStories 
+      : 0;
+
+    return {
+      workflow,
+      stories: workflowStories,
+      totalProgress,
+    };
+  }
+
+  static async getStoryForContinuation(
+    storyId: string
+  ): Promise<{
+    story: Story | null;
+    episodes: Episode[];
+    nextEpisodeNumber: number;
+    preferences: UserPreferencesData | null;
+  }> {
+    const { story, episodes } = await this.getStoryWithEpisodes(storyId);
+    
+    if (!story) {
+      return {
+        story: null,
+        episodes: [],
+        nextEpisodeNumber: 1,
+        preferences: null,
+      };
+    }
+
+    const nextEpisodeNumber = await EpisodeContinuationAccess.getNextEpisodeNumber(storyId);
+    
+    const userPreferences = await BatchUserPreferencesAccess.getPreferencesForStoryGeneration(story.userId);
+    
+    return {
+      story,
+      episodes,
+      nextEpisodeNumber,
+      preferences: userPreferences?.preferences || null,
+    };
   }
 }

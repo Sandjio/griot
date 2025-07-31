@@ -82,13 +82,69 @@ export interface GenerationRequest extends BaseEntity {
   relatedEntityId?: string; // storyId or episodeId
 }
 
+// Batch Workflow Entity
+export interface BatchWorkflow extends BaseEntity {
+  PK: `USER#${string}`; // USER#{userId}
+  SK: `WORKFLOW#${string}`; // WORKFLOW#{workflowId}
+  GSI1PK: `WORKFLOW#${string}`; // WORKFLOW#{workflowId}
+  GSI1SK: "METADATA";
+  GSI2PK: `STATUS#${BatchWorkflowStatus}`;
+  GSI2SK: string; // createdAt timestamp
+  workflowId: string;
+  userId: string;
+  requestId: string;
+  numberOfStories: number;
+  completedStories: number;
+  failedStories: number;
+  status: BatchWorkflowStatus;
+  preferences: UserPreferencesData;
+  insights?: QlooInsights;
+  estimatedCompletionTime?: string;
+  actualCompletionTime?: string;
+  errorMessage?: string;
+}
+
+// Episode Continuation Entity
+export interface EpisodeContinuation extends BaseEntity {
+  PK: `STORY#${string}`; // STORY#{storyId}
+  SK: `CONTINUATION#${string}`; // CONTINUATION#{continuationId}
+  GSI1PK: `CONTINUATION#${string}`; // CONTINUATION#{continuationId}
+  GSI1SK: "METADATA";
+  GSI2PK: `STATUS#${EpisodeContinuationStatus}`;
+  GSI2SK: string; // createdAt timestamp
+  continuationId: string;
+  storyId: string;
+  userId: string;
+  nextEpisodeNumber: number;
+  originalPreferences: UserPreferencesData;
+  storyS3Key: string;
+  status: EpisodeContinuationStatus;
+  resultingEpisodeId?: string;
+  errorMessage?: string;
+}
+
 // Supporting Types
 export type GenerationStatus =
   | "PENDING"
   | "PROCESSING"
   | "COMPLETED"
   | "FAILED";
-export type GenerationType = "STORY" | "EPISODE" | "IMAGE";
+export type GenerationType = "STORY" | "EPISODE" | "IMAGE" | "BATCH_WORKFLOW";
+
+// Batch Workflow Status
+export type BatchWorkflowStatus =
+  | "STARTED"
+  | "IN_PROGRESS"
+  | "COMPLETED"
+  | "FAILED"
+  | "CANCELLED";
+
+// Episode Continuation Status
+export type EpisodeContinuationStatus =
+  | "REQUESTED"
+  | "GENERATING"
+  | "COMPLETED"
+  | "FAILED";
 
 // User Preferences Data Structure
 export interface UserPreferencesData {

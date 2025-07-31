@@ -14,12 +14,18 @@ import {
   EpisodeAccess,
   GenerationRequestAccess,
   BatchOperations,
+  BatchWorkflowAccess,
+  EpisodeContinuationAccess,
+  BatchUserPreferencesAccess,
 } from "../access-patterns";
 import {
   UserProfile,
   Story,
   Episode,
   GenerationRequest,
+  BatchWorkflow,
+  EpisodeContinuation,
+  UserPreferences,
 } from "../../types/data-models";
 
 // Mock the DynamoDB Document Client
@@ -495,6 +501,342 @@ describe("DynamoDB Access Patterns", () => {
     });
   });
 
+  describe("BatchWorkflowAccess", () => {
+    it("should create a batch workflow with correct keys", async () => {
+      ddbMock.on(PutCommand).resolves({});
+
+      const workflow = {
+        workflowId: "workflow-123",
+        userId: "user-123",
+        requestId: "request-123",
+        numberOfStories: 5,
+        completedStories: 0,
+        failedStories: 0,
+        status: "STARTED" as const,
+        preferences: {
+          genres: ["action", "adventure"],
+          themes: ["friendship", "courage"],
+          artStyle: "manga",
+          targetAudience: "teen",
+          contentRating: "PG-13",
+        },
+        createdAt: "2024-01-01T00:00:00.000Z",
+      };
+
+      await BatchWorkflowAccess.create(workflow);
+
+      expect(ddbMock.commandCalls(PutCommand)).toHaveLength(1);
+      const putCall = ddbMock.commandCalls(PutCommand)[0];
+      expect(putCall.args[0].input).toMatchObject({
+        Item: {
+          PK: "USER#user-123",
+          SK: "WORKFLOW#workflow-123",
+          GSI1PK: "WORKFLOW#workflow-123",
+          GSI1SK: "METADATA",
+          GSI2PK: "STATUS#STARTED",
+          GSI2SK: "2024-01-01T00:00:00.000Z",
+          workflowId: "workflow-123",
+          userId: "user-123",
+          requestId: "request-123",
+          numberOfStories: 5,
+          completedStories: 0,
+          failedStories: 0,
+          status: "STARTED",
+          preferences: workflow.preferences,
+          createdAt: "2024-01-01T00:00:00.000Z",
+        },
+      });
+    });
+
+    it("should get workflow by workflow ID", async () => {
+      const mockWorkflow: BatchWorkflow = {
+        PK: "USER#user-123",
+        SK: "WORKFLOW#workflow-123",
+        GSI1PK: "WORKFLOW#workflow-123",
+        GSI1SK: "METADATA",
+        GSI2PK: "STATUS#IN_PROGRESS",
+        GSI2SK: "2024-01-01T00:00:00.000Z",
+        workflowId: "workflow-123",
+        userId: "user-123",
+        requestId: "request-123",
+        numberOfStories: 5,
+        completedStories: 2,
+        failedStories: 0,
+        status: "IN_PROGRESS",
+        preferences: {
+          genres: ["action"],
+          themes: ["friendship"],
+          artStyle: "manga",
+          targetAudience: "teen",
+          contentRating: "PG-13",
+        },
+        createdAt: "2024-01-01T00:00:00.000Z",
+      };
+
+      ddbMock.on(QueryCommand).resolves({ Items: [mockWorkflow] });
+
+      const result = await BatchWorkflowAccess.getByWorkflowId("workflow-123");
+
+      expect(result).toEqual(mockWorkflow);
+      expect(ddbMock.commandCalls(QueryCommand)).toHaveLength(1);
+      const queryCall = ddbMock.commandCalls(QueryCommand)[0];
+      expect(queryCall.args[0].input).toMatchObject({
+        IndexName: "GSI1",
+        KeyConditionExpression: "GSI1PK = :gsi1pk AND GSI1SK = :gsi1sk",
+        ExpressionAttributeValues: {
+          ":gsi1pk": "WORKFLOW#workflow-123",
+          ":gsi1sk": "METADATA",
+        },
+      });
+    });
+
+    it("should update workflow progress", async () => {
+      ddbMock.on(UpdateCommand).resolves({});
+
+      await BatchWorkflowAccess.updateProgress(
+        "user-123",
+        "workflow-123",
+        3,
+        1,
+        "IN_PROGRESS",
+        { estimatedCompletionTime: "2024-01-01T01:00:00.000Z" }
+      );
+
+      expect(ddbMock.commandCalls(UpdateCommand)).toHaveLength(1);
+      const updateCall = ddbMock.commandCalls(UpdateCommand)[0];
+      expect(updateCall.args[0].input).toMatchObject({
+        Key: {
+          PK: "USER#user-123",
+          SK: "WORKFLOW#workflow-123",
+        },
+        UpdateExpression:
+          "SET completedStories = :completedStories, failedStories = :failedStories, updatedAt = :updatedAt, #status = :status, GSI2PK = :gsi2pk, #estimatedCompletionTime = :estimatedCompletionTime",
+        ExpressionAttributeNames: {
+          "#status": "status",
+          "#estimatedCompletionTime": "estimatedCompletionTime",
+        },
+        ExpressionAttributeValues: expect.objectContaining({
+          ":completedStories": 3,
+          ":failedStories": 1,
+          ":status": "IN_PROGRESS",
+          ":gsi2pk": "STATUS#IN_PROGRESS",
+          ":estimatedCompletionTime": "2024-01-01T01:00:00.000Z",
+          ":updatedAt": expect.any(String),
+        }),
+      });
+    });
+
+    it("should get workflows by status", async () => {
+      const mockWorkflows = [
+        {
+          PK: "USER#user-123",
+          SK: "WORKFLOW#workflow-123",
+          status: "IN_PROGRESS",
+          createdAt: "2024-01-01T00:00:00.000Z",
+        },
+      ];
+
+      ddbMock.on(QueryCommand).resolves({ Items: mockWorkflows });
+
+      const result = await BatchWorkflowAccess.getWorkflowsByStatus("IN_PROGRESS");
+
+      expect(result).toEqual(mockWorkflows);
+      expect(ddbMock.commandCalls(QueryCommand)).toHaveLength(1);
+      const queryCall = ddbMock.commandCalls(QueryCommand)[0];
+      expect(queryCall.args[0].input).toMatchObject({
+        IndexName: "GSI2",
+        KeyConditionExpression: "GSI2PK = :gsi2pk",
+        ExpressionAttributeValues: {
+          ":gsi2pk": "STATUS#IN_PROGRESS",
+        },
+        ScanIndexForward: false,
+        Limit: 50,
+      });
+    });
+  });
+
+  describe("EpisodeContinuationAccess", () => {
+    it("should create an episode continuation with correct keys", async () => {
+      ddbMock.on(PutCommand).resolves({});
+
+      const continuation = {
+        continuationId: "continuation-123",
+        storyId: "story-123",
+        userId: "user-123",
+        nextEpisodeNumber: 2,
+        originalPreferences: {
+          genres: ["action", "adventure"],
+          themes: ["friendship", "courage"],
+          artStyle: "manga",
+          targetAudience: "teen",
+          contentRating: "PG-13",
+        },
+        storyS3Key: "stories/user-123/story-123/story.md",
+        status: "REQUESTED" as const,
+        createdAt: "2024-01-01T00:00:00.000Z",
+      };
+
+      await EpisodeContinuationAccess.create(continuation);
+
+      expect(ddbMock.commandCalls(PutCommand)).toHaveLength(1);
+      const putCall = ddbMock.commandCalls(PutCommand)[0];
+      expect(putCall.args[0].input).toMatchObject({
+        Item: {
+          PK: "STORY#story-123",
+          SK: "CONTINUATION#continuation-123",
+          GSI1PK: "CONTINUATION#continuation-123",
+          GSI1SK: "METADATA",
+          GSI2PK: "STATUS#REQUESTED",
+          GSI2SK: "2024-01-01T00:00:00.000Z",
+          continuationId: "continuation-123",
+          storyId: "story-123",
+          userId: "user-123",
+          nextEpisodeNumber: 2,
+          originalPreferences: continuation.originalPreferences,
+          storyS3Key: "stories/user-123/story-123/story.md",
+          status: "REQUESTED",
+          createdAt: "2024-01-01T00:00:00.000Z",
+        },
+      });
+    });
+
+    it("should get next episode number", async () => {
+      const mockEpisodes = [
+        {
+          PK: "STORY#story-123",
+          SK: "EPISODE#001",
+          episodeNumber: 1,
+        },
+        {
+          PK: "STORY#story-123",
+          SK: "EPISODE#002",
+          episodeNumber: 2,
+        },
+      ];
+
+      ddbMock.on(QueryCommand).resolves({ Items: mockEpisodes });
+
+      const result = await EpisodeContinuationAccess.getNextEpisodeNumber("story-123");
+
+      expect(result).toBe(3);
+      expect(ddbMock.commandCalls(QueryCommand)).toHaveLength(1);
+    });
+
+    it("should return 1 for next episode number when no episodes exist", async () => {
+      ddbMock.on(QueryCommand).resolves({ Items: [] });
+
+      const result = await EpisodeContinuationAccess.getNextEpisodeNumber("story-123");
+
+      expect(result).toBe(1);
+    });
+
+    it("should update continuation status", async () => {
+      ddbMock.on(UpdateCommand).resolves({});
+
+      await EpisodeContinuationAccess.updateStatus(
+        "story-123",
+        "continuation-123",
+        "COMPLETED",
+        { resultingEpisodeId: "episode-456" }
+      );
+
+      expect(ddbMock.commandCalls(UpdateCommand)).toHaveLength(1);
+      const updateCall = ddbMock.commandCalls(UpdateCommand)[0];
+      expect(updateCall.args[0].input).toMatchObject({
+        Key: {
+          PK: "STORY#story-123",
+          SK: "CONTINUATION#continuation-123",
+        },
+        UpdateExpression:
+          "SET #status = :status, updatedAt = :updatedAt, GSI2PK = :gsi2pk, #resultingEpisodeId = :resultingEpisodeId",
+        ExpressionAttributeNames: {
+          "#status": "status",
+          "#resultingEpisodeId": "resultingEpisodeId",
+        },
+        ExpressionAttributeValues: expect.objectContaining({
+          ":status": "COMPLETED",
+          ":gsi2pk": "STATUS#COMPLETED",
+          ":resultingEpisodeId": "episode-456",
+          ":updatedAt": expect.any(String),
+        }),
+      });
+    });
+  });
+
+  describe("BatchUserPreferencesAccess", () => {
+    it("should get preferences for story generation", async () => {
+      const mockPreferences: UserPreferences = {
+        PK: "USER#user-123",
+        SK: "PREFERENCES#2024-01-01T00:00:00.000Z",
+        GSI1PK: "USER#user-123",
+        GSI1SK: "PREFERENCES#2024-01-01T00:00:00.000Z",
+        preferences: {
+          genres: ["action", "adventure"],
+          themes: ["friendship", "courage"],
+          artStyle: "manga",
+          targetAudience: "teen",
+          contentRating: "PG-13",
+        },
+        insights: {
+          recommendations: [
+            {
+              category: "genre",
+              score: 0.9,
+              attributes: { popularity: "high" },
+            },
+          ],
+          trends: [
+            {
+              topic: "action",
+              popularity: 0.8,
+            },
+          ],
+        },
+        createdAt: "2024-01-01T00:00:00.000Z",
+      };
+
+      ddbMock.on(QueryCommand).resolves({ Items: [mockPreferences] });
+
+      const result = await BatchUserPreferencesAccess.getPreferencesForStoryGeneration(
+        "user-123"
+      );
+
+      expect(result).toEqual({
+        preferences: mockPreferences.preferences,
+        insights: mockPreferences.insights,
+        lastUpdated: mockPreferences.createdAt,
+      });
+      expect(ddbMock.commandCalls(QueryCommand)).toHaveLength(1);
+    });
+
+    it("should return null when no preferences exist for story generation", async () => {
+      ddbMock.on(QueryCommand).resolves({ Items: [] });
+
+      const result = await BatchUserPreferencesAccess.getPreferencesForStoryGeneration(
+        "user-123"
+      );
+
+      expect(result).toBeNull();
+    });
+
+    it("should handle errors in getPreferencesForStoryGeneration", async () => {
+      const consoleErrorSpy = jest
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
+      ddbMock.on(QueryCommand).rejects(new Error("Database error"));
+
+      await expect(
+        BatchUserPreferencesAccess.getPreferencesForStoryGeneration("user-123")
+      ).rejects.toThrow("Failed to retrieve user preferences for story generation");
+
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        "Error retrieving preferences for story generation:",
+        expect.any(Error)
+      );
+      consoleErrorSpy.mockRestore();
+    });
+  });
+
   describe("BatchOperations", () => {
     it("should get story with episodes", async () => {
       const mockStory: Story = {
@@ -551,6 +893,163 @@ describe("DynamoDB Access Patterns", () => {
         episodes: mockEpisodes,
       });
       expect(ddbMock.commandCalls(QueryCommand)).toHaveLength(2);
+    });
+
+    it("should get workflow progress", async () => {
+      const mockWorkflow: BatchWorkflow = {
+        PK: "USER#user-123",
+        SK: "WORKFLOW#workflow-123",
+        GSI1PK: "WORKFLOW#workflow-123",
+        GSI1SK: "METADATA",
+        GSI2PK: "STATUS#IN_PROGRESS",
+        GSI2SK: "2024-01-01T00:00:00.000Z",
+        workflowId: "workflow-123",
+        userId: "user-123",
+        requestId: "request-123",
+        numberOfStories: 5,
+        completedStories: 2,
+        failedStories: 1,
+        status: "IN_PROGRESS",
+        preferences: {
+          genres: ["action"],
+          themes: ["friendship"],
+          artStyle: "manga",
+          targetAudience: "teen",
+          contentRating: "PG-13",
+        },
+        createdAt: "2024-01-01T00:00:00.000Z",
+      };
+
+      const mockStories: Story[] = [
+        {
+          PK: "USER#user-123",
+          SK: "STORY#story-1",
+          GSI1PK: "STORY#story-1",
+          GSI1SK: "METADATA",
+          GSI2PK: "STATUS#COMPLETED",
+          GSI2SK: "2024-01-01T00:05:00.000Z",
+          storyId: "story-1",
+          userId: "user-123",
+          title: "Story 1",
+          s3Key: "stories/user-123/story-1/story.md",
+          status: "COMPLETED",
+          createdAt: "2024-01-01T00:05:00.000Z",
+        },
+      ];
+
+      // Mock workflow query
+      ddbMock
+        .on(QueryCommand, {
+          IndexName: "GSI1",
+          KeyConditionExpression: "GSI1PK = :gsi1pk AND GSI1SK = :gsi1sk",
+        })
+        .resolvesOnce({ Items: [mockWorkflow] });
+
+      // Mock user stories query
+      ddbMock
+        .on(QueryCommand, {
+          KeyConditionExpression: "PK = :pk AND begins_with(SK, :sk)",
+        })
+        .resolvesOnce({ Items: mockStories });
+
+      const result = await BatchOperations.getWorkflowProgress("workflow-123");
+
+      expect(result).toEqual({
+        workflow: mockWorkflow,
+        stories: mockStories,
+        totalProgress: 0.6, // (2 + 1) / 5
+      });
+      expect(ddbMock.commandCalls(QueryCommand)).toHaveLength(2);
+    });
+
+    it("should get story for continuation with all required data", async () => {
+      const mockStory: Story = {
+        PK: "USER#user-123",
+        SK: "STORY#story-123",
+        GSI1PK: "STORY#story-123",
+        GSI1SK: "METADATA",
+        GSI2PK: "STATUS#COMPLETED",
+        GSI2SK: "2024-01-01T00:00:00.000Z",
+        storyId: "story-123",
+        userId: "user-123",
+        title: "Test Story",
+        s3Key: "stories/user-123/story-123/story.md",
+        status: "COMPLETED",
+        createdAt: "2024-01-01T00:00:00.000Z",
+      };
+
+      const mockEpisodes: Episode[] = [
+        {
+          PK: "STORY#story-123",
+          SK: "EPISODE#001",
+          GSI1PK: "EPISODE#episode-123",
+          GSI1SK: "METADATA",
+          GSI2PK: "STATUS#COMPLETED",
+          GSI2SK: "2024-01-01T00:00:00.000Z",
+          episodeId: "episode-123",
+          episodeNumber: 1,
+          storyId: "story-123",
+          s3Key: "episodes/user-123/story-123/1/episode.md",
+          status: "COMPLETED",
+          createdAt: "2024-01-01T00:00:00.000Z",
+        },
+      ];
+
+      const mockPreferences: UserPreferences = {
+        PK: "USER#user-123",
+        SK: "PREFERENCES#2024-01-01T00:00:00.000Z",
+        GSI1PK: "USER#user-123",
+        GSI1SK: "PREFERENCES#2024-01-01T00:00:00.000Z",
+        preferences: {
+          genres: ["action", "adventure"],
+          themes: ["friendship", "courage"],
+          artStyle: "manga",
+          targetAudience: "teen",
+          contentRating: "PG-13",
+        },
+        createdAt: "2024-01-01T00:00:00.000Z",
+      };
+
+      // Mock story query
+      ddbMock
+        .on(QueryCommand, {
+          IndexName: "GSI1",
+          KeyConditionExpression: "GSI1PK = :gsi1pk AND GSI1SK = :gsi1sk",
+        })
+        .resolvesOnce({ Items: [mockStory] });
+
+      // Mock episodes query
+      ddbMock
+        .on(QueryCommand, {
+          KeyConditionExpression: "PK = :pk AND begins_with(SK, :sk)",
+          ExpressionAttributeValues: {
+            ":pk": "STORY#story-123",
+            ":sk": "EPISODE#",
+          },
+        })
+        .resolvesOnce({ Items: mockEpisodes })
+        .resolvesOnce({ Items: mockEpisodes }); // Called twice for next episode number
+
+      // Mock preferences query
+      ddbMock
+        .on(QueryCommand, {
+          KeyConditionExpression: "PK = :pk AND begins_with(SK, :sk)",
+          ExpressionAttributeValues: {
+            ":pk": "USER#user-123",
+            ":sk": "PREFERENCES#",
+          },
+        })
+        .resolvesOnce({ Items: [mockPreferences] });
+
+      const result = await BatchOperations.getStoryForContinuation("story-123");
+
+      expect(result).toEqual({
+        story: mockStory,
+        episodes: mockEpisodes,
+        nextEpisodeNumber: 2,
+        preferences: mockPreferences.preferences,
+      });
+      expect(ddbMock.commandCalls(QueryCommand)).toHaveLength(4);
     });
   });
 });
