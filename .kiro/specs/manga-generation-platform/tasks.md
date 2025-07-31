@@ -206,7 +206,7 @@
   - Write unit tests for continue episode functionality
   - _Requirements: 6B.1, 6B.2, 6B.3, 6B.4, 6B.5, 6B.6_
 
-- [ ] 24. Create API endpoint for continuing episode generation
+- [x] 24. Create API endpoint for continuing episode generation
 
   - Add POST /stories/{storyId}/episodes endpoint to API Gateway
   - Implement path parameter validation for storyId

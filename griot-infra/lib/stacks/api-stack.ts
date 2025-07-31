@@ -586,6 +586,47 @@ export class ApiStack extends cdk.Stack {
       }
     );
 
+    // Continue Episode Response Model
+    const continueEpisodeResponseModel = this.api.addModel(
+      "ContinueEpisodeResponseModel",
+      {
+        modelName: "ContinueEpisodeResponse",
+        contentType: "application/json",
+        schema: {
+          type: apigateway.JsonSchemaType.OBJECT,
+          properties: {
+            episodeId: {
+              type: apigateway.JsonSchemaType.STRING,
+            },
+            episodeNumber: {
+              type: apigateway.JsonSchemaType.NUMBER,
+            },
+            status: {
+              type: apigateway.JsonSchemaType.STRING,
+              enum: ["GENERATING"],
+            },
+            estimatedCompletionTime: {
+              type: apigateway.JsonSchemaType.STRING,
+            },
+            message: {
+              type: apigateway.JsonSchemaType.STRING,
+            },
+            timestamp: {
+              type: apigateway.JsonSchemaType.STRING,
+            },
+          },
+          required: [
+            "episodeId",
+            "episodeNumber",
+            "status",
+            "estimatedCompletionTime",
+            "message",
+            "timestamp",
+          ],
+        },
+      }
+    );
+
     // Preferences Processing Lambda function with security configuration
     const preferencesLambda = new NodejsFunction(this, "PreferencesLambda", {
       functionName: `manga-preferences-${props.environment}`,
@@ -912,6 +953,54 @@ export class ApiStack extends cdk.Stack {
     // Store Lambda function reference
     this.lambdaFunctions.workflowOrchestration = workflowOrchestrationLambda;
 
+    // Continue Episode Lambda function with security configuration
+    const continueEpisodeLambda = new NodejsFunction(
+      this,
+      "ContinueEpisodeLambda",
+      {
+        functionName: `manga-continue-episode-${props.environment}`,
+        runtime: lambda.Runtime.NODEJS_20_X,
+        handler: "handler",
+        entry: path.join(
+          __dirname,
+          "../../..",
+          "/src/lambdas/continue-episode/index.ts"
+        ),
+        role: this.securityConstruct.continueEpisodeRole,
+        bundling: {
+          minify: true,
+          sourceMap: true,
+          target: "node20",
+          externalModules: ["aws-sdk"],
+        },
+        projectRoot: path.join(__dirname, "../../.."),
+        environment: {
+          MANGA_TABLE_NAME: props.mangaTable.tableName,
+          EVENT_BUS_NAME: props.eventBus.eventBusName,
+          ENVIRONMENT: props.environment,
+          // Security-related environment variables
+          ENABLE_SECURITY_LOGGING: "true",
+          SECURITY_CONTEXT: "continueEpisode",
+        },
+        timeout: cdk.Duration.seconds(30),
+        memorySize: 512,
+        // Enable X-Ray tracing
+        tracing: lambda.Tracing.ACTIVE,
+        // VPC configuration if provided
+        ...(props.vpc
+          ? {
+              vpc: props.vpc,
+              vpcSubnets: {
+                subnets: props.vpc.privateSubnets,
+              },
+            }
+          : {}),
+      }
+    );
+
+    // Store Lambda function reference
+    this.lambdaFunctions.continueEpisode = continueEpisodeLambda;
+
     // Add methods with proper validation and response models
     storiesResource.addMethod(
       "GET",
@@ -975,6 +1064,161 @@ export class ApiStack extends cdk.Stack {
           },
           {
             statusCode: "404",
+            responseModels: {
+              "application/json": errorResponseModel,
+            },
+          },
+          {
+            statusCode: "500",
+            responseModels: {
+              "application/json": errorResponseModel,
+            },
+          },
+        ],
+      }
+    );
+
+    // Add episodes sub-resource to story resource for continue episode functionality
+    const storyEpisodesResource = storyResource.addResource("episodes");
+
+    // POST /stories/{storyId}/episodes endpoint for continuing episode generation
+    storyEpisodesResource.addMethod(
+      "POST",
+      new apigateway.LambdaIntegration(continueEpisodeLambda, {
+        proxy: true,
+        integrationResponses: [
+          {
+            statusCode: "202",
+            responseTemplates: {
+              "application/json": "",
+            },
+          },
+          {
+            statusCode: "400",
+            selectionPattern: "4\\d{2}",
+            responseTemplates: {
+              "application/json": JSON.stringify({
+                error: {
+                  code: "VALIDATION_ERROR",
+                  message: "Invalid request format",
+                  requestId: "$context.requestId",
+                  timestamp: "$context.requestTime",
+                },
+              }),
+            },
+          },
+          {
+            statusCode: "401",
+            selectionPattern: "401",
+            responseTemplates: {
+              "application/json": JSON.stringify({
+                error: {
+                  code: "UNAUTHORIZED",
+                  message: "Authentication required",
+                  requestId: "$context.requestId",
+                  timestamp: "$context.requestTime",
+                },
+              }),
+            },
+          },
+          {
+            statusCode: "404",
+            selectionPattern: "404",
+            responseTemplates: {
+              "application/json": JSON.stringify({
+                error: {
+                  code: "STORY_NOT_FOUND",
+                  message: "Story not found or you don't have access to it",
+                  requestId: "$context.requestId",
+                  timestamp: "$context.requestTime",
+                },
+              }),
+            },
+          },
+          {
+            statusCode: "409",
+            selectionPattern: "409",
+            responseTemplates: {
+              "application/json": JSON.stringify({
+                error: {
+                  code: "EPISODE_ALREADY_EXISTS",
+                  message: "Episode already exists",
+                  requestId: "$context.requestId",
+                  timestamp: "$context.requestTime",
+                },
+              }),
+            },
+          },
+          {
+            statusCode: "429",
+            selectionPattern: "429",
+            responseTemplates: {
+              "application/json": JSON.stringify({
+                error: {
+                  code: "RATE_LIMIT_EXCEEDED",
+                  message:
+                    "Too many episode continuation requests. Please try again later.",
+                  requestId: "$context.requestId",
+                  timestamp: "$context.requestTime",
+                },
+              }),
+            },
+          },
+          {
+            statusCode: "500",
+            selectionPattern: "5\\d{2}",
+            responseTemplates: {
+              "application/json": JSON.stringify({
+                error: {
+                  code: "INTERNAL_ERROR",
+                  message: "Internal server error",
+                  requestId: "$context.requestId",
+                  timestamp: "$context.requestTime",
+                },
+              }),
+            },
+          },
+        ],
+      }),
+      {
+        authorizer,
+        authorizationType: apigateway.AuthorizationType.COGNITO,
+        requestParameters: {
+          "method.request.path.storyId": true,
+        },
+        methodResponses: [
+          {
+            statusCode: "202",
+            responseModels: {
+              "application/json": continueEpisodeResponseModel,
+            },
+          },
+          {
+            statusCode: "400",
+            responseModels: {
+              "application/json": errorResponseModel,
+            },
+          },
+          {
+            statusCode: "401",
+            responseModels: {
+              "application/json": errorResponseModel,
+            },
+          },
+          {
+            statusCode: "404",
+            responseModels: {
+              "application/json": errorResponseModel,
+            },
+          },
+          {
+            statusCode: "409",
+            responseModels: {
+              "application/json": errorResponseModel,
+            },
+          },
+          {
+            statusCode: "429",
             responseModels: {
               "application/json": errorResponseModel,
             },

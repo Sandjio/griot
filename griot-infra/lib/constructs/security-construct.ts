@@ -32,6 +32,7 @@ export class SecurityConstruct extends Construct {
   public readonly contentRetrievalRole: iam.Role;
   public readonly statusCheckRole: iam.Role;
   public readonly workflowOrchestrationRole: iam.Role;
+  public readonly continueEpisodeRole: iam.Role;
   public readonly vpcEndpoints: { [key: string]: ec2.VpcEndpoint } = {};
 
   constructor(scope: Construct, id: string, props: SecurityConstructProps) {
@@ -837,6 +838,49 @@ export class SecurityConstruct extends Construct {
     (
       this as { workflowOrchestrationRole: iam.Role }
     ).workflowOrchestrationRole = workflowOrchestrationRole;
+
+    // Continue Episode Role
+    const continueEpisodeRole = new iam.Role(this, "ContinueEpisodeRole", {
+      roleName: `manga-continue-episode-role-${props.environment}`,
+      assumedBy: new iam.ServicePrincipal("lambda.amazonaws.com"),
+      description: "IAM role for Continue Episode Lambda",
+      inlinePolicies: {
+        BasePolicy: baseLambdaPolicy,
+        DynamoDBPolicy: new iam.PolicyDocument({
+          statements: [
+            new iam.PolicyStatement({
+              effect: iam.Effect.ALLOW,
+              actions: [
+                "dynamodb:PutItem",
+                "dynamodb:GetItem",
+                "dynamodb:UpdateItem",
+                "dynamodb:Query",
+              ],
+              resources: [
+                props.mangaTable.tableArn,
+                `${props.mangaTable.tableArn}/index/*`,
+              ],
+            }),
+          ],
+        }),
+        EventBridgePolicy: new iam.PolicyDocument({
+          statements: [
+            new iam.PolicyStatement({
+              effect: iam.Effect.ALLOW,
+              actions: ["events:PutEvents"],
+              resources: [props.eventBus.eventBusArn],
+              conditions: {
+                StringEquals: {
+                  "events:source": ["manga.story", "manga.generation"],
+                },
+              },
+            }),
+          ],
+        }),
+      },
+    });
+    (this as { continueEpisodeRole: iam.Role }).continueEpisodeRole =
+      continueEpisodeRole;
   }
 
   /**
@@ -902,6 +946,7 @@ export class SecurityConstruct extends Construct {
       | "contentRetrieval"
       | "statusCheck"
       | "workflowOrchestration"
+      | "continueEpisode"
   ): void {
     // Get the appropriate role based on function type
     let role: iam.Role;
@@ -929,6 +974,9 @@ export class SecurityConstruct extends Construct {
         break;
       case "workflowOrchestration":
         role = this.workflowOrchestrationRole;
+        break;
+      case "continueEpisode":
+        role = this.continueEpisodeRole;
         break;
       default:
         throw new Error(`Unknown function type: ${functionType}`);
@@ -964,6 +1012,7 @@ export class SecurityConstruct extends Construct {
       | "contentRetrieval"
       | "statusCheck"
       | "workflowOrchestration"
+      | "continueEpisode"
   ): iam.Role {
     switch (functionType) {
       case "postAuth":
@@ -982,6 +1031,8 @@ export class SecurityConstruct extends Construct {
         return this.statusCheckRole;
       case "workflowOrchestration":
         return this.workflowOrchestrationRole;
+      case "continueEpisode":
+        return this.continueEpisodeRole;
       default:
         throw new Error(`Unknown function type: ${functionType}`);
     }
