@@ -242,6 +242,8 @@ The deployment pipeline includes comprehensive validation:
 The validation script checks:
 
 - **API Gateway**: Endpoint availability and response codes
+  - GET /preferences endpoint functionality
+  - POST /preferences endpoint functionality
 - **Lambda Functions**: Function existence and state
 - **DynamoDB**: Table status and metrics
 - **S3 Buckets**: Bucket accessibility and configuration
@@ -270,6 +272,16 @@ Each environment includes:
 - **CloudWatch Alarms**: Critical failure alerts
 - **X-Ray Tracing**: Distributed request tracing
 - **Structured Logging**: Centralized log aggregation
+
+#### Preferences API Monitoring
+
+The preferences API includes comprehensive monitoring for both GET and POST endpoints:
+
+- **Performance Metrics**: Operation duration tracking for database operations and external API calls
+- **Business Metrics**: User preference submission tracking
+- **Error Tracking**: Detailed error logging with correlation IDs
+- **X-Ray Tracing**: End-to-end request tracing including Qloo API integration
+- **Health Checks**: Automated validation of both endpoint functionality
 
 ## Troubleshooting
 
