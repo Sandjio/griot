@@ -119,6 +119,8 @@ sequenceDiagram
 - `GET /stories/{storyId}` - Get specific story details
 - `GET /episodes/{episodeId}` - Get specific episode
 - `GET /status/{requestId}` - Check generation status
+- `POST /workflow/start` - Start batch manga generation workflow
+- `POST /stories/{storyId}/episodes` - Generate additional episodes for existing story
 
 **Authentication:**
 
@@ -224,6 +226,57 @@ interface BedrockImagePrompt {
 }
 ```
 
+#### 6. Workflow Orchestration Lambda
+
+```typescript
+interface WorkflowStartRequest {
+  numberOfStories: number;
+  batchSize?: number; // Default: 1 for sequential processing
+}
+
+interface WorkflowStartResponse {
+  workflowId: string;
+  requestId: string;
+  numberOfStories: number;
+  status: "STARTED";
+  estimatedCompletionTime: string;
+}
+
+interface BatchWorkflowEvent {
+  userId: string;
+  workflowId: string;
+  requestId: string;
+  numberOfStories: number;
+  currentBatch: number;
+  totalBatches: number;
+  preferences: PreferencesRequest;
+  insights: QlooInsights;
+}
+```
+
+#### 7. Continue Episode Lambda
+
+```typescript
+interface ContinueEpisodeRequest {
+  storyId: string;
+}
+
+interface ContinueEpisodeResponse {
+  episodeId: string;
+  episodeNumber: number;
+  status: "GENERATING";
+  estimatedCompletionTime: string;
+}
+
+interface ContinueEpisodeEvent {
+  userId: string;
+  storyId: string;
+  nextEpisodeNumber: number;
+  originalPreferences: PreferencesRequest;
+  storyS3Key: string;
+}
+```
+
 ### EventBridge Event Schemas
 
 #### Story Generation Event
@@ -268,6 +321,43 @@ interface BedrockImagePrompt {
     "userId": "string",
     "episodeId": "string",
     "episodeS3Key": "string",
+    "timestamp": "string"
+  }
+}
+```
+
+#### Batch Workflow Event
+
+```json
+{
+  "source": "manga.workflow",
+  "detail-type": "Batch Story Generation Requested",
+  "detail": {
+    "userId": "string",
+    "workflowId": "string",
+    "requestId": "string",
+    "numberOfStories": "number",
+    "currentBatch": "number",
+    "totalBatches": "number",
+    "preferences": "object",
+    "insights": "object",
+    "timestamp": "string"
+  }
+}
+```
+
+#### Continue Episode Event
+
+```json
+{
+  "source": "manga.story",
+  "detail-type": "Continue Episode Requested",
+  "detail": {
+    "userId": "string",
+    "storyId": "string",
+    "nextEpisodeNumber": "number",
+    "originalPreferences": "object",
+    "storyS3Key": "string",
     "timestamp": "string"
   }
 }

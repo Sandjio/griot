@@ -167,6 +167,7 @@
   - _Requirements: 9.5, 9.6_
 
 - [x] 20. Integrate and test complete system workflow
+
   - Deploy all components to development environment
   - Execute end-to-end testing of complete manga generation flow
   - Validate event-driven architecture with real data flows
@@ -174,3 +175,102 @@
   - Perform load testing and performance optimization
   - Document deployment procedures and operational runbooks
   - _Requirements: 10.1, 10.2, 10.3, 10.4, 10.5_
+
+- [ ] 21. Implement Workflow Orchestration Lambda for batch processing
+
+  - Create Lambda function to handle POST /workflow/start endpoint
+  - Implement sequential story generation logic (one story at a time)
+  - Add DynamoDB operations to query user preferences for story generation
+  - Implement workflow state management and progress tracking
+  - Add EventBridge integration to trigger story generation in batches
+  - Write unit tests for batch workflow orchestration
+  - _Requirements: 6A.1, 6A.2, 6A.3, 6A.4, 6A.5_
+
+- [ ] 22. Create API endpoint for batch workflow initiation
+
+  - Add POST /workflow/start endpoint to API Gateway configuration
+  - Implement request validation for numberOfStories parameter
+  - Integrate endpoint with Workflow Orchestration Lambda function
+  - Add proper authentication and authorization checks
+  - Configure CORS and error response handling
+  - Write integration tests for workflow start endpoint
+  - _Requirements: 6A.1, 6A.5_
+
+- [ ] 23. Implement Continue Episode Lambda function
+
+  - Create Lambda function to handle POST /stories/{storyId}/episodes endpoint
+  - Add logic to determine next episode number automatically
+  - Implement retrieval of original story content and user preferences
+  - Add EventBridge integration to trigger episode generation workflow
+  - Implement error handling for non-existent stories
+  - Write unit tests for continue episode functionality
+  - _Requirements: 6B.1, 6B.2, 6B.3, 6B.4, 6B.5, 6B.6_
+
+- [ ] 24. Create API endpoint for continuing episode generation
+
+  - Add POST /stories/{storyId}/episodes endpoint to API Gateway
+  - Implement path parameter validation for storyId
+  - Integrate endpoint with Continue Episode Lambda function
+  - Add proper error responses for invalid story IDs
+  - Configure authentication and rate limiting
+  - Write integration tests for continue episode endpoint
+  - _Requirements: 6B.1, 6B.5, 6B.6_
+
+- [ ] 25. Update Story Generation Lambda for batch workflow support
+
+  - Modify story generation to work with batch workflow events
+  - Add support for querying user preferences from DynamoDB when not provided
+  - Implement batch completion tracking and next story triggering
+  - Update EventBridge event publishing for batch workflow coordination
+  - Add error handling to continue batch processing on individual story failures
+  - Write unit tests for batch-aware story generation
+  - _Requirements: 6A.2, 6A.3, 6A.4, 6A.6_
+
+- [ ] 26. Enhance Episode Generation Lambda for continue episode support
+
+  - Update episode generation to support continue episode events
+  - Add logic to fetch original story preferences and content
+  - Implement automatic episode numbering for continued episodes
+  - Update DynamoDB operations to handle episode continuation
+  - Add proper error handling and state management
+  - Write unit tests for episode continuation functionality
+  - _Requirements: 6B.2, 6B.3, 6B.4, 6B.6_
+
+- [ ] 27. Update DynamoDB access patterns for batch workflow
+
+  - Add access patterns for workflow state management
+  - Implement batch progress tracking in DynamoDB
+  - Create queries for retrieving user preferences for story generation
+  - Add access patterns for episode continuation tracking
+  - Update existing access patterns to support new workflow features
+  - Write unit tests for new database access patterns
+  - _Requirements: 6A.2, 6A.5, 6B.2, 6B.3_
+
+- [ ] 28. Implement EventBridge event schemas for new workflows
+
+  - Define batch workflow event schemas and validation
+  - Create continue episode event schemas
+  - Update existing event schemas to support batch processing
+  - Implement event publishing utilities for new event types
+  - Add event validation and error handling
+  - Write unit tests for new event schemas and publishing
+  - _Requirements: 6A.4, 6A.5, 6B.4_
+
+- [ ] 29. Update monitoring and observability for new workflows
+
+  - Add CloudWatch metrics for batch workflow processing
+  - Implement monitoring for continue episode operations
+  - Create dashboards for batch processing progress and success rates
+  - Add alarms for workflow failures and performance issues
+  - Update logging to include batch and continuation context
+  - Configure X-Ray tracing for new workflow paths
+  - _Requirements: 6A.5, 6B.6_
+
+- [ ] 30. Create comprehensive tests for batch and continue workflows
+  - Write integration tests for complete batch workflow
+  - Implement tests for continue episode functionality
+  - Create load tests for batch processing scenarios
+  - Add error scenario tests for workflow failures
+  - Implement end-to-end tests for new API endpoints
+  - Write performance tests for sequential story generation
+  - _Requirements: 6A.3, 6A.4, 6A.6, 6B.4, 6B.6_

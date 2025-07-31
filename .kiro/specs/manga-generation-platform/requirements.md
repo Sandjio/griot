@@ -86,6 +86,32 @@ This document outlines the requirements for a serverless event-driven manga gene
 5. WHEN status endpoint is called THEN the system SHALL return generation progress information
 6. IF unauthorized access is attempted THEN the system SHALL return 401 Unauthorized response
 
+### Requirement 6A: Batch Manga Generation Workflow API
+
+**User Story:** As a user, I want to start a manga generation workflow that creates multiple stories in batches, so that I can generate several stories sequentially rather than simultaneously.
+
+#### Acceptance Criteria
+
+1. WHEN a POST request is made to /workflow/start THEN the system SHALL accept a parameter specifying the number of stories to generate
+2. WHEN the workflow starts THEN the system SHALL query user preferences from DynamoDB to use for story generation
+3. WHEN generating multiple stories THEN the system SHALL process them sequentially (one at a time) not simultaneously
+4. WHEN each story is completed THEN the system SHALL generate the first episode and corresponding images before proceeding to the next story
+5. WHEN the workflow is running THEN the system SHALL provide status updates via the /status endpoint
+6. IF the workflow fails on one story THEN the system SHALL continue with the remaining stories and report the failure
+
+### Requirement 6B: Continue Episode Generation API
+
+**User Story:** As a user, I want to generate additional episodes for existing manga stories, so that I can extend stories that I like.
+
+#### Acceptance Criteria
+
+1. WHEN a POST request is made to /stories/{storyId}/episodes THEN the system SHALL generate the next episode for that story
+2. WHEN generating a new episode THEN the system SHALL determine the next episode number automatically
+3. WHEN episode generation starts THEN the system SHALL use the original story content and user preferences
+4. WHEN the new episode is completed THEN the system SHALL generate corresponding images and create a PDF
+5. WHEN episode generation is requested for a non-existent story THEN the system SHALL return a 404 error
+6. IF episode generation fails THEN the system SHALL return appropriate error messages and maintain story state
+
 ### Requirement 7: Data Storage and Single Table Design
 
 **User Story:** As a system administrator, I want efficient data storage using DynamoDB Single Table Design, so that the system can scale cost-effectively.
