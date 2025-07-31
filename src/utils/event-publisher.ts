@@ -8,6 +8,7 @@ import {
   ImageGenerationEvent,
   GenerationStatusEvent,
   UserRegistrationEvent,
+  ContinueEpisodeEvent,
   MangaPlatformEvent,
 } from "../types/event-schemas";
 
@@ -319,6 +320,35 @@ export const EventPublishingHelpers = {
       });
     } catch (error) {
       console.error("Failed to publish status update event:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Publish continue episode event with error handling
+   */
+  async publishContinueEpisode(
+    userId: string,
+    storyId: string,
+    nextEpisodeNumber: number,
+    originalPreferences: any,
+    storyS3Key: string
+  ): Promise<void> {
+    try {
+      await eventPublisher.publishEvent({
+        source: "manga.story",
+        "detail-type": "Continue Episode Requested",
+        detail: {
+          userId,
+          storyId,
+          nextEpisodeNumber,
+          originalPreferences,
+          storyS3Key,
+          timestamp: new Date().toISOString(),
+        },
+      });
+    } catch (error) {
+      console.error("Failed to publish continue episode event:", error);
       throw error;
     }
   },

@@ -196,7 +196,7 @@
   - Write integration tests for workflow start endpoint
   - _Requirements: 6A.1, 6A.5_
 
-- [ ] 23. Implement Continue Episode Lambda function
+- [x] 23. Implement Continue Episode Lambda function
 
   - Create Lambda function to handle POST /stories/{storyId}/episodes endpoint
   - Add logic to determine next episode number automatically

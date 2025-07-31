@@ -549,6 +549,20 @@ export class BusinessMetrics {
       { UserId: userId, ErrorType: errorType }
     );
   }
+
+  // Episode Continuation Metrics
+  static async recordEpisodeContinuation(
+    userId: string,
+    storyId: string
+  ): Promise<void> {
+    await this.metrics.publishMetric(
+      METRIC_NAMESPACES.BUSINESS,
+      "EpisodeContinuations",
+      1,
+      "Count",
+      { UserId: userId, StoryId: storyId }
+    );
+  }
 }
 
 /**
