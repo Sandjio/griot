@@ -236,7 +236,7 @@
   - Write unit tests for episode continuation functionality
   - _Requirements: 6B.2, 6B.3, 6B.4, 6B.6_
 
-- [ ] 27. Update DynamoDB access patterns for batch workflow
+- [-] 27. Update DynamoDB access patterns for batch workflow
 
   - Add access patterns for workflow state management
   - Implement batch progress tracking in DynamoDB
@@ -246,7 +246,7 @@
   - Write unit tests for new database access patterns
   - _Requirements: 6A.2, 6A.5, 6B.2, 6B.3_
 
-- [ ] 28. Implement EventBridge event schemas for new workflows
+- [-] 28. Implement EventBridge event schemas for new workflows
 
   - Define batch workflow event schemas and validation
   - Create continue episode event schemas
@@ -256,7 +256,7 @@
   - Write unit tests for new event schemas and publishing
   - _Requirements: 6A.4, 6A.5, 6B.4_
 
-- [ ] 29. Update monitoring and observability for new workflows
+- [x] 29. Update monitoring and observability for new workflows
 
   - Add CloudWatch metrics for batch workflow processing
   - Implement monitoring for continue episode operations

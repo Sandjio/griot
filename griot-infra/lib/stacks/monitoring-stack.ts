@@ -71,6 +71,39 @@ export class MonitoringStack extends cdk.Stack {
       },
     });
 
+    // Additional X-Ray sampling rules for new workflows
+    new xray.CfnSamplingRule(this, "BatchWorkflowTracingRule", {
+      samplingRule: {
+        ruleName: `manga-batch-workflow-tracing-${props.environment}`,
+        priority: 8000,
+        fixedRate: 0.2, // 20% sampling rate for batch workflows
+        reservoirSize: 2,
+        serviceName: "manga-platform",
+        serviceType: "*",
+        host: "*",
+        httpMethod: "POST",
+        urlPath: "/workflow/start",
+        resourceArn: "*",
+        version: 1,
+      },
+    });
+
+    new xray.CfnSamplingRule(this, "EpisodeContinuationTracingRule", {
+      samplingRule: {
+        ruleName: `manga-episode-continuation-tracing-${props.environment}`,
+        priority: 8100,
+        fixedRate: 0.15, // 15% sampling rate for episode continuations
+        reservoirSize: 1,
+        serviceName: "manga-platform",
+        serviceType: "*",
+        host: "*",
+        httpMethod: "POST",
+        urlPath: "/stories/*/episodes",
+        resourceArn: "*",
+        version: 1,
+      },
+    });
+
     // CloudWatch Dashboard
     this.dashboard = new cloudwatch.Dashboard(this, "MangaDashboard", {
       dashboardName: `manga-platform-${props.environment}`,
@@ -79,6 +112,8 @@ export class MonitoringStack extends cdk.Stack {
     // Create comprehensive monitoring widgets
     this.createSystemOverviewWidgets(props);
     this.createBusinessMetricsWidgets(props);
+    this.createBatchWorkflowWidgets(props);
+    this.createEpisodeContinuationWidgets(props);
     this.createLambdaMetricsWidgets(props);
     this.createEventBridgeMetricsWidgets(props);
     this.createXRayMetricsWidgets(props);
@@ -86,6 +121,8 @@ export class MonitoringStack extends cdk.Stack {
     // Create comprehensive alarms
     this.createSystemAlarms(props);
     this.createBusinessAlarms(props);
+    this.createBatchWorkflowAlarms(props);
+    this.createEpisodeContinuationAlarms(props);
     this.createLambdaAlarms(props);
 
     // Create centralized log groups with structured logging
@@ -330,6 +367,134 @@ export class MonitoringStack extends cdk.Stack {
     });
 
     this.dashboard.addWidgets(businessMetricsWidget, processingTimeWidget);
+  }
+
+  private createBatchWorkflowWidgets(props: MonitoringStackProps): void {
+    // Batch Workflow Progress and Success Rate
+    const batchWorkflowWidget = new cloudwatch.GraphWidget({
+      title: "Batch Workflow - Progress & Success Rate",
+      width: 12,
+      height: 6,
+      left: [
+        new cloudwatch.Metric({
+          namespace: "MangaPlatform/Business",
+          metricName: "WorkflowStarts",
+          statistic: "Sum",
+          label: "Workflow Starts",
+        }),
+        new cloudwatch.Metric({
+          namespace: "MangaPlatform/Business",
+          metricName: "WorkflowCompletions",
+          statistic: "Sum",
+          label: "Workflow Completions",
+        }),
+      ],
+      right: [
+        new cloudwatch.Metric({
+          namespace: "MangaPlatform/Business",
+          metricName: "BatchWorkflowSuccessRate",
+          statistic: "Average",
+          label: "Success Rate (%)",
+        }),
+        new cloudwatch.Metric({
+          namespace: "MangaPlatform/Business",
+          metricName: "WorkflowFailures",
+          statistic: "Sum",
+          label: "Workflow Failures",
+        }),
+      ],
+    });
+
+    // Batch Processing Performance
+    const batchPerformanceWidget = new cloudwatch.GraphWidget({
+      title: "Batch Workflow - Performance",
+      width: 12,
+      height: 6,
+      left: [
+        new cloudwatch.Metric({
+          namespace: "MangaPlatform/Performance",
+          metricName: "BatchWorkflowDuration",
+          statistic: "Average",
+          label: "Avg Workflow Duration",
+        }),
+        new cloudwatch.Metric({
+          namespace: "MangaPlatform/Performance",
+          metricName: "BatchWorkflowDuration",
+          statistic: "p99",
+          label: "P99 Workflow Duration",
+        }),
+      ],
+      right: [
+        new cloudwatch.Metric({
+          namespace: "MangaPlatform/Business",
+          metricName: "BatchStoryGenerations",
+          statistic: "Sum",
+          label: "Total Stories in Batches",
+        }),
+        new cloudwatch.Metric({
+          namespace: "MangaPlatform/Business",
+          metricName: "BatchWorkflowProgress",
+          statistic: "Average",
+          label: "Avg Progress (%)",
+        }),
+      ],
+    });
+
+    this.dashboard.addWidgets(batchWorkflowWidget, batchPerformanceWidget);
+  }
+
+  private createEpisodeContinuationWidgets(props: MonitoringStackProps): void {
+    // Episode Continuation Metrics
+    const episodeContinuationWidget = new cloudwatch.GraphWidget({
+      title: "Episode Continuation - Requests & Success",
+      width: 12,
+      height: 6,
+      left: [
+        new cloudwatch.Metric({
+          namespace: "MangaPlatform/Business",
+          metricName: "EpisodeContinuations",
+          statistic: "Sum",
+          label: "Continuation Requests",
+        }),
+        new cloudwatch.Metric({
+          namespace: "MangaPlatform/Business",
+          metricName: "EpisodeContinuationSuccess",
+          statistic: "Sum",
+          label: "Successful Continuations",
+        }),
+      ],
+      right: [
+        new cloudwatch.Metric({
+          namespace: "MangaPlatform/Business",
+          metricName: "EpisodeContinuationFailures",
+          statistic: "Sum",
+          label: "Failed Continuations",
+        }),
+      ],
+    });
+
+    // Episode Continuation Performance
+    const episodePerformanceWidget = new cloudwatch.GraphWidget({
+      title: "Episode Continuation - Performance",
+      width: 12,
+      height: 6,
+      left: [
+        new cloudwatch.Metric({
+          namespace: "MangaPlatform/Performance",
+          metricName: "EpisodeContinuationDuration",
+          statistic: "Average",
+          label: "Avg Continuation Duration",
+        }),
+        new cloudwatch.Metric({
+          namespace: "MangaPlatform/Performance",
+          metricName: "EpisodeContinuationDuration",
+          statistic: "p99",
+          label: "P99 Continuation Duration",
+        }),
+      ],
+    });
+
+    this.dashboard.addWidgets(episodeContinuationWidget, episodePerformanceWidget);
   }
 
   private createLambdaMetricsWidgets(props: MonitoringStackProps): void {
@@ -598,6 +763,96 @@ export class MonitoringStack extends cdk.Stack {
     });
 
     storyFailureAlarm.addAlarmAction({
+      bind: () => ({ alarmActionArn: this.alertTopic.topicArn }),
+    });
+  }
+
+  private createBatchWorkflowAlarms(props: MonitoringStackProps): void {
+    // Batch Workflow Failure Rate Alarm
+    const batchWorkflowFailureAlarm = new cloudwatch.Alarm(
+      this,
+      "BatchWorkflowFailureAlarm",
+      {
+        alarmName: `manga-batch-workflow-failures-${props.environment}`,
+        alarmDescription: "High batch workflow failure rate",
+        metric: new cloudwatch.MathExpression({
+          expression: "failures / (successes + failures) * 100",
+          usingMetrics: {
+            failures: new cloudwatch.Metric({
+              namespace: "MangaPlatform/Business",
+              metricName: "WorkflowFailures",
+              statistic: "Sum",
+            }),
+            successes: new cloudwatch.Metric({
+              namespace: "MangaPlatform/Business",
+              metricName: "WorkflowCompletions",
+              statistic: "Sum",
+            }),
+          },
+        }),
+        threshold: 25, // 25% failure rate
+        evaluationPeriods: 2,
+        comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      }
+    );
+
+    // Batch Workflow Duration Alarm
+    const batchWorkflowDurationAlarm = new cloudwatch.Alarm(
+      this,
+      "BatchWorkflowDurationAlarm",
+      {
+        alarmName: `manga-batch-workflow-duration-${props.environment}`,
+        alarmDescription: "Batch workflow taking too long",
+        metric: new cloudwatch.Metric({
+          namespace: "MangaPlatform/Performance",
+          metricName: "BatchWorkflowDuration",
+          statistic: "Average",
+        }),
+        threshold: 1800000, // 30 minutes in milliseconds
+        evaluationPeriods: 1,
+        comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      }
+    );
+
+    [batchWorkflowFailureAlarm, batchWorkflowDurationAlarm].forEach((alarm) => {
+      alarm.addAlarmAction({
+        bind: () => ({ alarmActionArn: this.alertTopic.topicArn }),
+      });
+    });
+  }
+
+  private createEpisodeContinuationAlarms(props: MonitoringStackProps): void {
+    // Episode Continuation Failure Rate Alarm
+    const episodeContinuationFailureAlarm = new cloudwatch.Alarm(
+      this,
+      "EpisodeContinuationFailureAlarm",
+      {
+        alarmName: `manga-episode-continuation-failures-${props.environment}`,
+        alarmDescription: "High episode continuation failure rate",
+        metric: new cloudwatch.MathExpression({
+          expression: "failures / (successes + failures) * 100",
+          usingMetrics: {
+            failures: new cloudwatch.Metric({
+              namespace: "MangaPlatform/Business",
+              metricName: "EpisodeContinuationFailures",
+              statistic: "Sum",
+            }),
+            successes: new cloudwatch.Metric({
+              namespace: "MangaPlatform/Business",
+              metricName: "EpisodeContinuationSuccess",
+              statistic: "Sum",
+            }),
+          },
+        }),
+        threshold: 15, // 15% failure rate
+        evaluationPeriods: 2,
+        comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      }
+    );
+
+    episodeContinuationFailureAlarm.addAlarmAction({
       bind: () => ({ alarmActionArn: this.alertTopic.topicArn }),
     });
   }

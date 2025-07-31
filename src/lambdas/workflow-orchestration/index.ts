@@ -270,6 +270,14 @@ const handleWorkflowStart = async (
     subsegment?.addAnnotation("workflowId", workflowId);
     subsegment?.addAnnotation("numberOfStories", numberOfStories);
     subsegment?.addAnnotation("batchSize", batchSize);
+    subsegment?.addAnnotation("workflowType", "batch");
+    subsegment?.addMetadata("workflow", {
+      workflowId,
+      numberOfStories,
+      batchSize,
+      totalBatches,
+      timestamp,
+    });
 
     // Query user preferences from DynamoDB
     const preferencesTimer = new PerformanceTimer("DynamoDB-GetPreferences");
@@ -342,6 +350,12 @@ const handleWorkflowStart = async (
 
     // Record business metrics
     await BusinessMetrics.recordWorkflowStart(userId, numberOfStories);
+    await BusinessMetrics.recordBatchWorkflowProgress(
+      userId,
+      workflowId,
+      1,
+      totalBatches
+    );
 
     // Calculate estimated completion time (rough estimate: 3 minutes per story)
     const estimatedMinutes = numberOfStories * 3;

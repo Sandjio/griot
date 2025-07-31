@@ -243,8 +243,18 @@ const storyGenerationHandler = async (
 
     // Handle batch workflow completion tracking
     if (isBatchWorkflow) {
+      const batchDetail = event.detail as BatchWorkflowEventDetail;
+      
+      // Record batch workflow progress
+      await BusinessMetrics.recordBatchWorkflowProgress(
+        userId,
+        batchDetail.workflowId,
+        batchDetail.currentBatch,
+        batchDetail.totalBatches
+      );
+      
       await handleBatchWorkflowCompletion(
-        event.detail as BatchWorkflowEventDetail,
+        batchDetail,
         storyResult,
         preferences,
         insights
@@ -294,8 +304,18 @@ const storyGenerationHandler = async (
 
     // Handle batch workflow error continuation
     if (isBatchWorkflow) {
+      const batchDetail = event.detail as BatchWorkflowEventDetail;
+      
+      // Record batch workflow failure metrics
+      await BusinessMetrics.recordBatchWorkflowFailure(
+        userId,
+        batchDetail.workflowId,
+        errorType,
+        batchDetail.currentBatch
+      );
+      
       await handleBatchWorkflowError(
-        event.detail as BatchWorkflowEventDetail,
+        batchDetail,
         error,
         preferences,
         insights

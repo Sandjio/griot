@@ -20,6 +20,12 @@ import {
   CorrelationContext,
   ErrorLogger,
 } from "../../utils/error-handler";
+import {
+  BusinessMetrics,
+  ExternalAPIMetrics,
+  PerformanceTimer,
+} from "../../utils/cloudwatch-metrics";
+import AWSXRay from "aws-xray-sdk-core";
 
 /**
  * Episode Generation Lambda Function
@@ -53,8 +59,13 @@ const episodeGenerationHandler = async (
   event: EpisodeEvent,
   correlationId: string
 ): Promise<void> => {
+  // Start X-Ray subsegment for this operation
+  const segment = AWSXRay.getSegment();
+  const subsegment = segment?.addNewSubsegment("EpisodeGeneration");
+  
   const eventType = event["detail-type"];
   const isContinueEpisode = eventType === "Continue Episode Requested";
+  const operationTimer = new PerformanceTimer("EpisodeGeneration");
 
   ErrorLogger.logInfo(
     "Episode Generation Lambda invoked",
@@ -65,21 +76,103 @@ const episodeGenerationHandler = async (
       storyId: event.detail.storyId,
       isContinueEpisode,
       correlationId,
+      traceId: segment?.trace_id,
     },
     "EpisodeGeneration"
   );
-
-  // Handle different event types
+  
+  // Add context to X-Ray
+  subsegment?.addAnnotation("userId", event.detail.userId);
+  subsegment?.addAnnotation("storyId", event.detail.storyId);
+  subsegment?.addAnnotation("isContinueEpisode", isContinueEpisode);
+  subsegment?.addAnnotation("eventType", eventType);
+  
   if (isContinueEpisode) {
-    await handleContinueEpisodeEvent(
-      event as ContinueEpisodeEvent,
-      correlationId
-    );
+    const continueDetail = event.detail as ContinueEpisodeEventDetail;
+    subsegment?.addAnnotation("nextEpisodeNumber", continueDetail.nextEpisodeNumber);
   } else {
-    await handleRegularEpisodeEvent(
-      event as EpisodeGenerationEvent,
-      correlationId
+    const regularDetail = event.detail as EpisodeGenerationEventDetail;
+    subsegment?.addAnnotation("episodeNumber", regularDetail.episodeNumber);
+  }
+
+  try {
+    // Handle different event types
+    if (isContinueEpisode) {
+      await handleContinueEpisodeEvent(
+        event as ContinueEpisodeEvent,
+        correlationId,
+        subsegment
+      );
+    } else {
+      await handleRegularEpisodeEvent(
+        event as EpisodeGenerationEvent,
+        correlationId,
+        subsegment
+      );
+    }
+    
+    // Record success metrics
+    const totalDuration = operationTimer.stop();
+    const userId = event.detail.userId;
+    const storyId = event.detail.storyId;
+    
+    if (isContinueEpisode) {
+      const episodeNumber = (event.detail as ContinueEpisodeEventDetail).nextEpisodeNumber;
+      await BusinessMetrics.recordEpisodeContinuationSuccess(
+        userId,
+        storyId,
+        episodeNumber,
+        totalDuration
+      );
+    } else {
+      await BusinessMetrics.recordEpisodeGenerationSuccess(userId, totalDuration);
+    }
+    
+    subsegment?.addAnnotation("success", true);
+    subsegment?.addMetadata("performance", { totalDuration });
+    subsegment?.close();
+    
+  } catch (error) {
+    const totalDuration = operationTimer.stop();
+    const userId = event.detail.userId;
+    const storyId = event.detail.storyId;
+    const errorType = error instanceof Error ? error.constructor.name : "UNKNOWN_ERROR";
+    
+    ErrorLogger.logError(
+      error instanceof Error ? error : new Error(String(error)),
+      {
+        userId,
+        storyId,
+        isContinueEpisode,
+        totalDuration,
+        operation: "EpisodeGeneration",
+      },
+      "EpisodeGeneration"
     );
+    
+    // Record failure metrics
+    if (isContinueEpisode) {
+      const episodeNumber = (event.detail as ContinueEpisodeEventDetail).nextEpisodeNumber;
+      await BusinessMetrics.recordEpisodeContinuationFailure(
+        userId,
+        storyId,
+        errorType,
+        episodeNumber
+      );
+    } else {
+      await BusinessMetrics.recordEpisodeGenerationFailure(userId, errorType);
+    }
+    
+    subsegment?.addError(error instanceof Error ? error : new Error(String(error)));
+    subsegment?.addAnnotation("success", false);
+    subsegment?.addMetadata("error", {
+      message: error instanceof Error ? error.message : String(error),
+      type: errorType,
+      totalDuration,
+    });
+    subsegment?.close();
+    
+    throw error;
   }
 };
 
@@ -88,7 +181,8 @@ const episodeGenerationHandler = async (
  */
 async function handleRegularEpisodeEvent(
   event: EpisodeGenerationEvent,
-  correlationId: string
+  correlationId: string,
+  subsegment?: any
 ): Promise<void> {
   const { userId, storyId, storyS3Key, episodeNumber } = event.detail;
 
@@ -123,7 +217,8 @@ async function handleRegularEpisodeEvent(
  */
 async function handleContinueEpisodeEvent(
   event: ContinueEpisodeEvent,
-  correlationId: string
+  correlationId: string,
+  subsegment?: any
 ): Promise<void> {
   const {
     userId,

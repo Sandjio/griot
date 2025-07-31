@@ -316,6 +316,14 @@ const handleContinueEpisode = async (
     // Add episode context to X-Ray
     subsegment?.addAnnotation("episodeId", episodeId);
     subsegment?.addAnnotation("nextEpisodeNumber", nextEpisodeNumber);
+    subsegment?.addAnnotation("operationType", "episodeContinuation");
+    subsegment?.addMetadata("episodeContinuation", {
+      episodeId,
+      nextEpisodeNumber,
+      storyTitle: story.title,
+      existingEpisodesCount: existingEpisodes.length,
+      timestamp,
+    });
 
     // Create generation request for tracking
     const createRequestTimer = new PerformanceTimer("DynamoDB-CreateRequest");

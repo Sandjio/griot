@@ -49,6 +49,11 @@ export const BUSINESS_METRICS = {
   WORKFLOW_COMPLETIONS: "WorkflowCompletions",
   WORKFLOW_FAILURES: "WorkflowFailures",
   BATCH_STORY_GENERATIONS: "BatchStoryGenerations",
+  BATCH_WORKFLOW_PROGRESS: "BatchWorkflowProgress",
+  BATCH_WORKFLOW_SUCCESS_RATE: "BatchWorkflowSuccessRate",
+  EPISODE_CONTINUATIONS: "EpisodeContinuations",
+  EPISODE_CONTINUATION_SUCCESS: "EpisodeContinuationSuccess",
+  EPISODE_CONTINUATION_FAILURES: "EpisodeContinuationFailures",
 } as const;
 
 export const PERFORMANCE_METRICS = {
@@ -60,6 +65,8 @@ export const PERFORMANCE_METRICS = {
   BEDROCK_API_RESPONSE_TIME: "BedrockApiResponseTime",
   S3_UPLOAD_DURATION: "S3UploadDuration",
   DYNAMODB_OPERATION_DURATION: "DynamoDBOperationDuration",
+  BATCH_WORKFLOW_DURATION: "BatchWorkflowDuration",
+  EPISODE_CONTINUATION_DURATION: "EpisodeContinuationDuration",
 } as const;
 
 export const ERROR_METRICS = {
@@ -69,6 +76,8 @@ export const ERROR_METRICS = {
   DYNAMODB_OPERATION_ERRORS: "DynamoDBOperationErrors",
   VALIDATION_ERRORS: "ValidationErrors",
   CIRCUIT_BREAKER_TRIPS: "CircuitBreakerTrips",
+  BATCH_WORKFLOW_ERRORS: "BatchWorkflowErrors",
+  EPISODE_CONTINUATION_ERRORS: "EpisodeContinuationErrors",
 } as const;
 
 export const EXTERNAL_API_METRICS = {
@@ -550,6 +559,88 @@ export class BusinessMetrics {
     );
   }
 
+  // Batch Workflow Metrics
+  static async recordBatchWorkflowProgress(
+    userId: string,
+    workflowId: string,
+    currentBatch: number,
+    totalBatches: number
+  ): Promise<void> {
+    await Promise.all([
+      this.metrics.publishMetric(
+        METRIC_NAMESPACES.BUSINESS,
+        BUSINESS_METRICS.BATCH_WORKFLOW_PROGRESS,
+        (currentBatch / totalBatches) * 100,
+        "Percent",
+        { UserId: userId, WorkflowId: workflowId }
+      ),
+      this.metrics.publishMetric(
+        METRIC_NAMESPACES.BUSINESS,
+        "BatchProgress",
+        currentBatch,
+        "Count",
+        { UserId: userId, WorkflowId: workflowId, TotalBatches: totalBatches.toString() }
+      ),
+    ]);
+  }
+
+  static async recordBatchWorkflowSuccess(
+    userId: string,
+    workflowId: string,
+    duration: number,
+    totalStories: number
+  ): Promise<void> {
+    await Promise.all([
+      this.metrics.publishMetric(
+        METRIC_NAMESPACES.BUSINESS,
+        BUSINESS_METRICS.BATCH_WORKFLOW_SUCCESS_RATE,
+        100,
+        "Percent",
+        { UserId: userId, WorkflowId: workflowId }
+      ),
+      this.metrics.publishMetric(
+        METRIC_NAMESPACES.PERFORMANCE,
+        PERFORMANCE_METRICS.BATCH_WORKFLOW_DURATION,
+        duration,
+        "Milliseconds",
+        { UserId: userId, WorkflowId: workflowId, TotalStories: totalStories.toString() }
+      ),
+    ]);
+  }
+
+  static async recordBatchWorkflowFailure(
+    userId: string,
+    workflowId: string,
+    errorType: string,
+    failedAtBatch?: number
+  ): Promise<void> {
+    const dimensions: { [key: string]: string } = {
+      UserId: userId,
+      WorkflowId: workflowId,
+      ErrorType: errorType,
+    };
+    if (failedAtBatch !== undefined) {
+      dimensions.FailedAtBatch = failedAtBatch.toString();
+    }
+
+    await Promise.all([
+      this.metrics.publishMetric(
+        METRIC_NAMESPACES.BUSINESS,
+        BUSINESS_METRICS.BATCH_WORKFLOW_SUCCESS_RATE,
+        0,
+        "Percent",
+        dimensions
+      ),
+      this.metrics.publishMetric(
+        METRIC_NAMESPACES.ERRORS,
+        ERROR_METRICS.BATCH_WORKFLOW_ERRORS,
+        1,
+        "Count",
+        dimensions
+      ),
+    ]);
+  }
+
   // Episode Continuation Metrics
   static async recordEpisodeContinuation(
     userId: string,
@@ -557,11 +648,68 @@ export class BusinessMetrics {
   ): Promise<void> {
     await this.metrics.publishMetric(
       METRIC_NAMESPACES.BUSINESS,
-      "EpisodeContinuations",
+      BUSINESS_METRICS.EPISODE_CONTINUATIONS,
       1,
       "Count",
       { UserId: userId, StoryId: storyId }
     );
+  }
+
+  static async recordEpisodeContinuationSuccess(
+    userId: string,
+    storyId: string,
+    episodeNumber: number,
+    duration: number
+  ): Promise<void> {
+    await Promise.all([
+      this.metrics.publishMetric(
+        METRIC_NAMESPACES.BUSINESS,
+        BUSINESS_METRICS.EPISODE_CONTINUATION_SUCCESS,
+        1,
+        "Count",
+        { UserId: userId, StoryId: storyId, EpisodeNumber: episodeNumber.toString() }
+      ),
+      this.metrics.publishMetric(
+        METRIC_NAMESPACES.PERFORMANCE,
+        PERFORMANCE_METRICS.EPISODE_CONTINUATION_DURATION,
+        duration,
+        "Milliseconds",
+        { UserId: userId, StoryId: storyId, EpisodeNumber: episodeNumber.toString() }
+      ),
+    ]);
+  }
+
+  static async recordEpisodeContinuationFailure(
+    userId: string,
+    storyId: string,
+    errorType: string,
+    episodeNumber?: number
+  ): Promise<void> {
+    const dimensions: { [key: string]: string } = {
+      UserId: userId,
+      StoryId: storyId,
+      ErrorType: errorType,
+    };
+    if (episodeNumber !== undefined) {
+      dimensions.EpisodeNumber = episodeNumber.toString();
+    }
+
+    await Promise.all([
+      this.metrics.publishMetric(
+        METRIC_NAMESPACES.BUSINESS,
+        BUSINESS_METRICS.EPISODE_CONTINUATION_FAILURES,
+        1,
+        "Count",
+        dimensions
+      ),
+      this.metrics.publishMetric(
+        METRIC_NAMESPACES.ERRORS,
+        ERROR_METRICS.EPISODE_CONTINUATION_ERRORS,
+        1,
+        "Count",
+        dimensions
+      ),
+    ]);
   }
 }
 
