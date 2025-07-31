@@ -226,7 +226,7 @@
   - Write unit tests for batch-aware story generation
   - _Requirements: 6A.2, 6A.3, 6A.4, 6A.6_
 
-- [ ] 26. Enhance Episode Generation Lambda for continue episode support
+- [x] 26. Enhance Episode Generation Lambda for continue episode support
 
   - Update episode generation to support continue episode events
   - Add logic to fetch original story preferences and content

@@ -1,15 +1,20 @@
 import { EventBridgeEvent } from "aws-lambda";
 import { v4 as uuidv4 } from "uuid";
-import { EpisodeGenerationEventDetail } from "../../types/event-schemas";
+import {
+  EpisodeGenerationEventDetail,
+  ContinueEpisodeEventDetail,
+} from "../../types/event-schemas";
 import {
   StoryAccess,
   EpisodeAccess,
   GenerationRequestAccess,
+  UserPreferencesAccess,
 } from "../../database/access-patterns";
 import { EventPublishingHelpers } from "../../utils/event-publisher";
 import { createMangaStorageService } from "../../storage/manga-storage";
 import { BedrockClient } from "./bedrock-client";
 import { EpisodeContent } from "../../storage/manga-storage";
+import { UserPreferencesData } from "../../types/data-models";
 import {
   withErrorHandling,
   CorrelationContext,
@@ -24,7 +29,10 @@ import {
  * episode as Markdown file to S3, stores episode metadata in DynamoDB, and
  * publishes events for image generation.
  *
- * Requirements: 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7
+ * Enhanced to support continue episode events for generating additional episodes
+ * for existing stories with automatic episode numbering and original preferences.
+ *
+ * Requirements: 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 6B.2, 6B.3, 6B.4, 6B.6
  */
 
 interface EpisodeGenerationEvent
@@ -33,23 +41,55 @@ interface EpisodeGenerationEvent
     EpisodeGenerationEventDetail
   > {}
 
+interface ContinueEpisodeEvent
+  extends EventBridgeEvent<
+    "Continue Episode Requested",
+    ContinueEpisodeEventDetail
+  > {}
+
+type EpisodeEvent = EpisodeGenerationEvent | ContinueEpisodeEvent;
+
 const episodeGenerationHandler = async (
-  event: EpisodeGenerationEvent,
+  event: EpisodeEvent,
   correlationId: string
 ): Promise<void> => {
+  const eventType = event["detail-type"];
+  const isContinueEpisode = eventType === "Continue Episode Requested";
+
   ErrorLogger.logInfo(
     "Episode Generation Lambda invoked",
     {
       source: event.source,
-      detailType: event["detail-type"],
+      detailType: eventType,
       userId: event.detail.userId,
       storyId: event.detail.storyId,
-      episodeNumber: event.detail.episodeNumber,
+      isContinueEpisode,
       correlationId,
     },
     "EpisodeGeneration"
   );
 
+  // Handle different event types
+  if (isContinueEpisode) {
+    await handleContinueEpisodeEvent(
+      event as ContinueEpisodeEvent,
+      correlationId
+    );
+  } else {
+    await handleRegularEpisodeEvent(
+      event as EpisodeGenerationEvent,
+      correlationId
+    );
+  }
+};
+
+/**
+ * Handle regular episode generation events
+ */
+async function handleRegularEpisodeEvent(
+  event: EpisodeGenerationEvent,
+  correlationId: string
+): Promise<void> {
   const { userId, storyId, storyS3Key, episodeNumber } = event.detail;
 
   // Input validation
@@ -69,6 +109,85 @@ const episodeGenerationHandler = async (
     throw new Error("Episode number must be a positive integer");
   }
 
+  await generateEpisode({
+    userId,
+    storyId,
+    episodeNumber,
+    storyS3Key,
+    originalPreferences: undefined, // Will be fetched if needed
+  });
+}
+
+/**
+ * Handle continue episode events with automatic episode numbering
+ */
+async function handleContinueEpisodeEvent(
+  event: ContinueEpisodeEvent,
+  correlationId: string
+): Promise<void> {
+  const {
+    userId,
+    storyId,
+    nextEpisodeNumber,
+    originalPreferences,
+    storyS3Key,
+  } = event.detail;
+
+  // Input validation
+  if (!userId || userId.trim() === "") {
+    throw new Error("User ID is required and cannot be empty");
+  }
+
+  if (!storyId || storyId.trim() === "") {
+    throw new Error("Story ID is required and cannot be empty");
+  }
+
+  if (!storyS3Key || storyS3Key.trim() === "") {
+    throw new Error("Story S3 key is required and cannot be empty");
+  }
+
+  if (!nextEpisodeNumber || nextEpisodeNumber < 1) {
+    throw new Error("Next episode number must be a positive integer");
+  }
+
+  if (!originalPreferences) {
+    throw new Error(
+      "Original preferences are required for continue episode events"
+    );
+  }
+
+  console.log("Processing continue episode request", {
+    userId,
+    storyId,
+    nextEpisodeNumber,
+    hasOriginalPreferences: !!originalPreferences,
+  });
+
+  await generateEpisode({
+    userId,
+    storyId,
+    episodeNumber: nextEpisodeNumber,
+    storyS3Key,
+    originalPreferences,
+  });
+}
+
+/**
+ * Core episode generation logic shared by both event types
+ */
+async function generateEpisode({
+  userId,
+  storyId,
+  episodeNumber,
+  storyS3Key,
+  originalPreferences,
+}: {
+  userId: string;
+  storyId: string;
+  episodeNumber: number;
+  storyS3Key: string;
+  originalPreferences?: UserPreferencesData;
+}): Promise<void> {
   const episodeId = uuidv4();
   const timestamp = new Date().toISOString();
 
@@ -79,6 +198,7 @@ const episodeGenerationHandler = async (
       episodeId,
       episodeNumber,
       storyS3Key,
+      isContinueEpisode: !!originalPreferences,
     });
 
     // Verify story exists and get story metadata
@@ -91,6 +211,23 @@ const episodeGenerationHandler = async (
       throw new Error(
         `Story is not completed. Current status: ${story.status}`
       );
+    }
+
+    // For continue episodes, verify the episode number is sequential
+    if (originalPreferences) {
+      const existingEpisodes = await EpisodeAccess.getStoryEpisodes(storyId);
+      const maxEpisodeNumber =
+        existingEpisodes.length > 0
+          ? Math.max(...existingEpisodes.map((ep) => ep.episodeNumber))
+          : 0;
+
+      if (episodeNumber !== maxEpisodeNumber + 1) {
+        throw new Error(
+          `Invalid episode number for continuation. Expected ${
+            maxEpisodeNumber + 1
+          }, got ${episodeNumber}`
+        );
+      }
     }
 
     // Check if episode already exists
@@ -150,15 +287,38 @@ const episodeGenerationHandler = async (
       storyId,
     });
 
+    // Get user preferences for episode generation context
+    let userPreferences = originalPreferences;
+    if (!userPreferences) {
+      console.log("Fetching user preferences for episode generation context");
+      const preferencesData = await UserPreferencesAccess.getLatestWithMetadata(
+        userId
+      );
+      userPreferences = preferencesData.preferences;
+
+      if (!userPreferences) {
+        console.warn(
+          "No user preferences found, proceeding without preferences context"
+        );
+      }
+    }
+
     // Initialize Bedrock client for episode generation
     const bedrockClient = new BedrockClient();
 
-    // Generate episode content using Bedrock
-    const episodeResponse = await bedrockClient.generateEpisode(
-      storyContent,
-      episodeNumber,
-      story.title
-    );
+    // Generate episode content using Bedrock with preferences context
+    const episodeResponse = userPreferences
+      ? await bedrockClient.generateEpisodeWithPreferences(
+          storyContent,
+          episodeNumber,
+          story.title,
+          userPreferences
+        )
+      : await bedrockClient.generateEpisode(
+          storyContent,
+          episodeNumber,
+          story.title
+        );
 
     console.log("Successfully generated episode content", {
       userId,
@@ -169,6 +329,7 @@ const episodeGenerationHandler = async (
       tokensUsed:
         (episodeResponse.usage?.inputTokens || 0) +
         (episodeResponse.usage?.outputTokens || 0),
+      hasPreferences: !!userPreferences,
     });
 
     // Parse the generated episode content to extract title and content
@@ -193,6 +354,8 @@ const episodeGenerationHandler = async (
           (episodeResponse.usage?.inputTokens || 0) +
             (episodeResponse.usage?.outputTokens || 0)
         ),
+        isContinueEpisode: !!originalPreferences,
+        hasPreferencesContext: !!userPreferences,
       },
     };
 
@@ -216,6 +379,7 @@ const episodeGenerationHandler = async (
     await EpisodeAccess.updateStatus(storyId, episodeNumber, "COMPLETED", {
       s3Key: s3Reference.key,
       title,
+      isContinueEpisode: !!originalPreferences,
     });
 
     console.log("Successfully updated episode metadata in DynamoDB", {
@@ -274,6 +438,7 @@ const episodeGenerationHandler = async (
       episodeId,
       episodeNumber,
       title,
+      isContinueEpisode: !!originalPreferences,
     });
   } catch (error) {
     console.error("Error in episode generation", {
@@ -281,6 +446,7 @@ const episodeGenerationHandler = async (
       storyId,
       episodeId,
       episodeNumber,
+      isContinueEpisode: !!originalPreferences,
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined,
     });
@@ -335,7 +501,7 @@ const episodeGenerationHandler = async (
     // Re-throw the original error to trigger Lambda retry/DLQ
     throw error;
   }
-};
+}
 
 /**
  * Parse generated episode content to extract title and main content

@@ -489,4 +489,201 @@ describe("BedrockClient", () => {
       consoleSpy.mockRestore();
     });
   });
+
+  describe("generateEpisodeWithPreferences", () => {
+    const mockStoryContent = "# Test Story\n\nThis is a test story content.";
+    const episodeNumber = 2;
+    const storyTitle = "Test Story";
+    const mockUserPreferences = {
+      genres: ["Action", "Adventure"],
+      themes: ["Friendship", "Growth"],
+      artStyle: "Manga",
+      targetAudience: "Teen",
+      contentRating: "PG-13",
+    };
+
+    it("should generate episode with preferences successfully", async () => {
+      const mockResponse = {
+        body: new TextEncoder().encode(
+          JSON.stringify({
+            content: [
+              {
+                text: "# Episode 2: The Adventure Continues\n\nThis episode incorporates user preferences for action and adventure themes.",
+              },
+            ],
+            usage: {
+              input_tokens: 200,
+              output_tokens: 350,
+            },
+          })
+        ),
+      };
+
+      mockSend.mockResolvedValue(mockResponse);
+
+      const result = await bedrockClient.generateEpisodeWithPreferences(
+        mockStoryContent,
+        episodeNumber,
+        storyTitle,
+        mockUserPreferences
+      );
+
+      expect(result).toEqual({
+        content:
+          "# Episode 2: The Adventure Continues\n\nThis episode incorporates user preferences for action and adventure themes.",
+        usage: {
+          inputTokens: 200,
+          outputTokens: 350,
+        },
+      });
+
+      expect(mockSend).toHaveBeenCalledTimes(1);
+      expect(mockInvokeModelCommand).toHaveBeenCalledWith({
+        modelId: "anthropic.claude-3-sonnet-20240229-v1:0",
+        body: expect.stringContaining("Action, Adventure"),
+        contentType: "application/json",
+        accept: "application/json",
+      });
+    });
+
+    it("should generate episode without preferences when none provided", async () => {
+      const mockResponse = {
+        body: new TextEncoder().encode(
+          JSON.stringify({
+            content: [
+              {
+                text: "# Episode 2: The Journey\n\nThis episode maintains story consistency without specific preferences.",
+              },
+            ],
+            usage: {
+              input_tokens: 180,
+              output_tokens: 320,
+            },
+          })
+        ),
+      };
+
+      mockSend.mockResolvedValue(mockResponse);
+
+      const result = await bedrockClient.generateEpisodeWithPreferences(
+        mockStoryContent,
+        episodeNumber,
+        storyTitle,
+        undefined
+      );
+
+      expect(result).toEqual({
+        content:
+          "# Episode 2: The Journey\n\nThis episode maintains story consistency without specific preferences.",
+        usage: {
+          inputTokens: 180,
+          outputTokens: 320,
+        },
+      });
+
+      expect(mockSend).toHaveBeenCalledTimes(1);
+      expect(mockInvokeModelCommand).toHaveBeenCalledWith({
+        modelId: "anthropic.claude-3-sonnet-20240229-v1:0",
+        body: expect.stringContaining("No specific user preferences available"),
+        contentType: "application/json",
+        accept: "application/json",
+      });
+    });
+
+    it("should handle Bedrock errors for preferences-based generation", async () => {
+      const mockError = new Error("Bedrock preferences error");
+      mockSend.mockRejectedValue(mockError);
+
+      await expect(
+        bedrockClient.generateEpisodeWithPreferences(
+          mockStoryContent,
+          episodeNumber,
+          storyTitle,
+          mockUserPreferences
+        )
+      ).rejects.toThrow(
+        "Failed to generate episode content with preferences: Bedrock preferences error"
+      );
+
+      expect(mockSend).toHaveBeenCalledTimes(1);
+    });
+
+    it("should handle throttling errors for preferences-based generation", async () => {
+      const mockError = new Error("throttling error occurred");
+      mockSend.mockRejectedValue(mockError);
+
+      await expect(
+        bedrockClient.generateEpisodeWithPreferences(
+          mockStoryContent,
+          episodeNumber,
+          storyTitle,
+          mockUserPreferences
+        )
+      ).rejects.toThrow(
+        "Bedrock service is currently throttled. Please try again later."
+      );
+
+      expect(mockSend).toHaveBeenCalledTimes(1);
+    });
+
+    it("should handle content filter errors for preferences-based generation", async () => {
+      const mockError = new Error("content filter violation");
+      mockSend.mockRejectedValue(mockError);
+
+      await expect(
+        bedrockClient.generateEpisodeWithPreferences(
+          mockStoryContent,
+          episodeNumber,
+          storyTitle,
+          mockUserPreferences
+        )
+      ).rejects.toThrow(
+        "Generated content was filtered. Please adjust the story content and try again."
+      );
+
+      expect(mockSend).toHaveBeenCalledTimes(1);
+    });
+
+    it("should include preferences context in prompt", async () => {
+      const mockResponse = {
+        body: new TextEncoder().encode(
+          JSON.stringify({
+            content: [
+              {
+                text: "# Episode 2: Action-Packed Adventure\n\nThis episode follows the user's preference for action and adventure.",
+              },
+            ],
+            usage: {
+              input_tokens: 220,
+              output_tokens: 380,
+            },
+          })
+        ),
+      };
+
+      mockSend.mockResolvedValue(mockResponse);
+
+      await bedrockClient.generateEpisodeWithPreferences(
+        mockStoryContent,
+        episodeNumber,
+        storyTitle,
+        mockUserPreferences
+      );
+
+      // Verify that the prompt includes user preferences
+      const callArgs = mockInvokeModelCommand.mock.calls[0][0];
+      const requestBody = JSON.parse(callArgs.body);
+      const prompt = requestBody.messages[0].content;
+
+      expect(prompt).toContain("USER PREFERENCES CONTEXT:");
+      expect(prompt).toContain("Action, Adventure");
+      expect(prompt).toContain("Friendship, Growth");
+      expect(prompt).toContain("Manga");
+      expect(prompt).toContain("Teen");
+      expect(prompt).toContain("PG-13");
+      expect(prompt).toContain(
+        "Please ensure the episode content aligns with these user preferences"
+      );
+    });
+  });
 });
