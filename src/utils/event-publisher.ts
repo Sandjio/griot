@@ -2,6 +2,7 @@ import {
   EventBridgeClient,
   PutEventsCommand,
 } from "@aws-sdk/client-eventbridge";
+import { ErrorLogger } from "./error-handler";
 import {
   StoryGenerationEvent,
   EpisodeGenerationEvent,
@@ -9,7 +10,11 @@ import {
   GenerationStatusEvent,
   UserRegistrationEvent,
   ContinueEpisodeEvent,
+  BatchWorkflowStatusEvent,
+  BatchStoryCompletionEvent,
+  EpisodeContinuationStatusEvent,
   MangaPlatformEvent,
+  EventSchemaValidator,
 } from "../types/event-schemas";
 
 export class EventPublisher {
@@ -120,10 +125,18 @@ export class EventPublisher {
   }
 
   /**
-   * Generic method to publish any manga platform event
+   * Generic method to publish any manga platform event with validation
    */
   async publishEvent(event: MangaPlatformEvent): Promise<void> {
     try {
+      // Validate event schema before publishing
+      const validation = EventSchemaValidator.validateEvent(event);
+      if (!validation.isValid) {
+        throw new Error(
+          `Event validation failed: ${validation.errors.join(', ')}`
+        );
+      }
+
       // Log the event bus name for debugging
       console.log(
         `Publishing event to EventBridge bus: "${this.eventBusName}"`,
@@ -171,7 +184,61 @@ export class EventPublisher {
   }
 
   /**
-   * Publish multiple events in a batch
+   * Publish batch workflow status event
+   */
+  async publishBatchWorkflowStatusEvent(
+    eventDetail: BatchWorkflowStatusEvent["detail"]
+  ): Promise<void> {
+    const event: BatchWorkflowStatusEvent = {
+      source: "manga.workflow",
+      "detail-type": "Batch Workflow Status Updated",
+      detail: {
+        ...eventDetail,
+        timestamp: eventDetail.timestamp || new Date().toISOString(),
+      },
+    };
+
+    await this.publishEvent(event);
+  }
+
+  /**
+   * Publish batch story completion event
+   */
+  async publishBatchStoryCompletionEvent(
+    eventDetail: BatchStoryCompletionEvent["detail"]
+  ): Promise<void> {
+    const event: BatchStoryCompletionEvent = {
+      source: "manga.workflow",
+      "detail-type": "Batch Story Completed",
+      detail: {
+        ...eventDetail,
+        timestamp: eventDetail.timestamp || new Date().toISOString(),
+      },
+    };
+
+    await this.publishEvent(event);
+  }
+
+  /**
+   * Publish episode continuation status event
+   */
+  async publishEpisodeContinuationStatusEvent(
+    eventDetail: EpisodeContinuationStatusEvent["detail"]
+  ): Promise<void> {
+    const event: EpisodeContinuationStatusEvent = {
+      source: "manga.episode",
+      "detail-type": "Episode Continuation Status Updated",
+      detail: {
+        ...eventDetail,
+        timestamp: eventDetail.timestamp || new Date().toISOString(),
+      },
+    };
+
+    await this.publishEvent(event);
+  }
+
+  /**
+   * Publish multiple events in a batch with validation
    */
   async publishEvents(events: MangaPlatformEvent[]): Promise<void> {
     if (events.length === 0) {
@@ -180,6 +247,23 @@ export class EventPublisher {
 
     if (events.length > 10) {
       throw new Error("Cannot publish more than 10 events in a single batch");
+    }
+
+    // Validate all events before publishing
+    const validationErrors: string[] = [];
+    events.forEach((event, index) => {
+      const validation = EventSchemaValidator.validateEvent(event);
+      if (!validation.isValid) {
+        validationErrors.push(
+          `Event ${index}: ${validation.errors.join(', ')}`
+        );
+      }
+    });
+
+    if (validationErrors.length > 0) {
+      throw new Error(
+        `Batch event validation failed: ${validationErrors.join('; ')}`
+      );
     }
 
     try {
@@ -224,6 +308,108 @@ export class EventPublisher {
  * Singleton instance for easy access
  */
 export const eventPublisher = new EventPublisher();
+
+/**
+ * Event publishing utilities for new workflow types
+ */
+export class WorkflowEventPublisher {
+  private eventPublisher: EventPublisher;
+
+  constructor(eventPublisher?: EventPublisher) {
+    this.eventPublisher = eventPublisher || new EventPublisher();
+  }
+
+  /**
+   * Publish workflow start event with validation
+   */
+  async publishWorkflowStart(
+    userId: string,
+    workflowId: string,
+    requestId: string,
+    numberOfStories: number
+  ): Promise<void> {
+    await EventPublishingHelpers.publishBatchWorkflowStatus(
+      userId,
+      workflowId,
+      requestId,
+      "STARTED",
+      0,
+      numberOfStories,
+      0,
+      0
+    );
+  }
+
+  /**
+   * Publish workflow progress update
+   */
+  async publishWorkflowProgress(
+    userId: string,
+    workflowId: string,
+    requestId: string,
+    currentBatch: number,
+    totalBatches: number,
+    completedStories: number,
+    failedStories: number
+  ): Promise<void> {
+    await EventPublishingHelpers.publishBatchWorkflowStatus(
+      userId,
+      workflowId,
+      requestId,
+      "IN_PROGRESS",
+      currentBatch,
+      totalBatches,
+      completedStories,
+      failedStories
+    );
+  }
+
+  /**
+   * Publish workflow completion
+   */
+  async publishWorkflowCompletion(
+    userId: string,
+    workflowId: string,
+    requestId: string,
+    totalBatches: number,
+    completedStories: number,
+    failedStories: number
+  ): Promise<void> {
+    await EventPublishingHelpers.publishBatchWorkflowStatus(
+      userId,
+      workflowId,
+      requestId,
+      "COMPLETED",
+      totalBatches,
+      totalBatches,
+      completedStories,
+      failedStories
+    );
+  }
+
+  /**
+   * Publish episode continuation request
+   */
+  async publishEpisodeContinuationRequest(
+    userId: string,
+    storyId: string,
+    episodeId: string,
+    episodeNumber: number
+  ): Promise<void> {
+    await EventPublishingHelpers.publishEpisodeContinuationStatus(
+      userId,
+      storyId,
+      episodeId,
+      episodeNumber,
+      "REQUESTED"
+    );
+  }
+}
+
+/**
+ * Singleton workflow event publisher
+ */
+export const workflowEventPublisher = new WorkflowEventPublisher();
 
 /**
  * Helper functions for common event publishing patterns
@@ -384,6 +570,93 @@ export const EventPublishingHelpers = {
       });
     } catch (error) {
       console.error("Failed to publish batch story generation event:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Publish batch workflow status update with error handling
+   */
+  async publishBatchWorkflowStatus(
+    userId: string,
+    workflowId: string,
+    requestId: string,
+    status: "STARTED" | "IN_PROGRESS" | "COMPLETED" | "FAILED" | "CANCELLED",
+    currentBatch: number,
+    totalBatches: number,
+    completedStories: number,
+    failedStories: number,
+    errorMessage?: string
+  ): Promise<void> {
+    try {
+      await eventPublisher.publishBatchWorkflowStatusEvent({
+        userId,
+        workflowId,
+        requestId,
+        status,
+        currentBatch,
+        totalBatches,
+        completedStories,
+        failedStories,
+        errorMessage,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error("Failed to publish batch workflow status event:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Publish batch story completion with error handling
+   */
+  async publishBatchStoryCompletion(
+    userId: string,
+    workflowId: string,
+    storyId: string,
+    batchNumber: number,
+    totalBatches: number,
+    isLastStory: boolean
+  ): Promise<void> {
+    try {
+      await eventPublisher.publishBatchStoryCompletionEvent({
+        userId,
+        workflowId,
+        storyId,
+        batchNumber,
+        totalBatches,
+        isLastStory,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error("Failed to publish batch story completion event:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Publish episode continuation status with error handling
+   */
+  async publishEpisodeContinuationStatus(
+    userId: string,
+    storyId: string,
+    episodeId: string,
+    episodeNumber: number,
+    status: "REQUESTED" | "GENERATING" | "COMPLETED" | "FAILED",
+    errorMessage?: string
+  ): Promise<void> {
+    try {
+      await eventPublisher.publishEpisodeContinuationStatusEvent({
+        userId,
+        storyId,
+        episodeId,
+        episodeNumber,
+        status,
+        errorMessage,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error("Failed to publish episode continuation status event:", error);
       throw error;
     }
   },
