@@ -216,7 +216,7 @@
   - Write integration tests for continue episode endpoint
   - _Requirements: 6B.1, 6B.5, 6B.6_
 
-- [ ] 25. Update Story Generation Lambda for batch workflow support
+- [x] 25. Update Story Generation Lambda for batch workflow support
 
   - Modify story generation to work with batch workflow events
   - Add support for querying user preferences from DynamoDB when not provided

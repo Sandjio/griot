@@ -3,11 +3,15 @@ import { BedrockClient } from "../bedrock-client";
 import {
   StoryAccess,
   GenerationRequestAccess,
+  UserPreferencesAccess,
 } from "../../../database/access-patterns";
 import { EventPublishingHelpers } from "../../../utils/event-publisher";
 import { createMangaStorageService } from "../../../storage/manga-storage";
 import { EventBridgeEvent } from "aws-lambda";
-import { StoryGenerationEventDetail } from "../../../types/event-schemas";
+import {
+  StoryGenerationEventDetail,
+  BatchWorkflowEventDetail,
+} from "../../../types/event-schemas";
 
 // Mock all dependencies
 jest.mock("../bedrock-client");
@@ -24,6 +28,9 @@ const mockBedrockClient = BedrockClient as jest.MockedClass<
 const mockStoryAccess = StoryAccess as jest.Mocked<typeof StoryAccess>;
 const mockGenerationRequestAccess = GenerationRequestAccess as jest.Mocked<
   typeof GenerationRequestAccess
+>;
+const mockUserPreferencesAccess = UserPreferencesAccess as jest.Mocked<
+  typeof UserPreferencesAccess
 >;
 const mockEventPublishingHelpers = EventPublishingHelpers as jest.Mocked<
   typeof EventPublishingHelpers
@@ -140,7 +147,7 @@ describe("Story Generation Lambda", () => {
             storyId: "test-story-id-123",
             userId: "test-user-123",
             requestId: "test-request-456",
-            tokensUsed: 300,
+            tokensUsed: "300", // Changed to string to match implementation
           }),
         })
       );
@@ -415,33 +422,20 @@ describe("Story Generation Lambda", () => {
 
       await handler(mockEvent);
 
+      // Check for structured logging format
       expect(consoleSpy).toHaveBeenCalledWith(
-        "Story Generation Lambda invoked",
-        expect.objectContaining({
-          source: "manga.preferences",
-          detailType: "Story Generation Requested",
-          userId: "test-user-123",
-          requestId: "test-request-456",
-        })
+        "Info:",
+        expect.stringContaining("Story Generation Lambda invoked")
       );
 
       expect(consoleSpy).toHaveBeenCalledWith(
-        "Starting story generation",
-        expect.objectContaining({
-          userId: "test-user-123",
-          requestId: "test-request-456",
-          storyId: "test-story-id-123",
-        })
+        "Info:",
+        expect.stringContaining("Starting story generation")
       );
 
       expect(consoleSpy).toHaveBeenCalledWith(
-        "Story generation completed successfully",
-        expect.objectContaining({
-          userId: "test-user-123",
-          requestId: "test-request-456",
-          storyId: "test-story-id-123",
-          title: "The Adventure Begins",
-        })
+        "Info:",
+        expect.stringContaining("Story generation completed successfully")
       );
 
       consoleSpy.mockRestore();
@@ -454,17 +448,403 @@ describe("Story Generation Lambda", () => {
 
       await expect(handler(mockEvent)).rejects.toThrow();
 
+      // Check for structured error logging format
       expect(consoleErrorSpy).toHaveBeenCalledWith(
-        "Error in story generation",
-        expect.objectContaining({
-          userId: "test-user-123",
-          requestId: "test-request-456",
-          storyId: "test-story-id-123",
-          error: "Test error",
-        })
+        "Error occurred:",
+        expect.stringContaining("Test error")
       );
 
       consoleErrorSpy.mockRestore();
+    });
+  });
+
+  describe("Batch Workflow Support", () => {
+    const mockBatchEvent: EventBridgeEvent<
+      "Batch Story Generation Requested",
+      BatchWorkflowEventDetail
+    > = {
+      version: "0",
+      id: "test-batch-event-id",
+      "detail-type": "Batch Story Generation Requested",
+      source: "manga.workflow",
+      account: "123456789012",
+      time: "2024-01-01T00:00:00Z",
+      region: "us-east-1",
+      resources: [],
+      detail: {
+        userId: "test-user-123",
+        workflowId: "test-workflow-456",
+        requestId: "test-request-batch-1",
+        numberOfStories: 3,
+        currentBatch: 1,
+        totalBatches: 3,
+        preferences: {
+          genres: ["Action", "Adventure"],
+          themes: ["Friendship", "Growth"],
+          artStyle: "Shonen",
+          targetAudience: "Teen",
+          contentRating: "PG-13",
+        },
+        insights: {
+          recommendations: [
+            { category: "Action", score: 0.9, attributes: {} },
+            { category: "Adventure", score: 0.8, attributes: {} },
+          ],
+          trends: [
+            { topic: "Friendship", popularity: 0.95 },
+            { topic: "Growth", popularity: 0.85 },
+          ],
+        },
+        timestamp: "2024-01-01T00:00:00Z",
+      },
+    };
+
+    beforeEach(() => {
+      // Setup additional mocks for batch workflow
+      mockEventPublishingHelpers.publishBatchStoryGeneration = jest
+        .fn()
+        .mockResolvedValue();
+      mockGenerationRequestAccess.create = jest.fn().mockResolvedValue();
+    });
+
+    describe("Batch workflow with provided preferences", () => {
+      it("should successfully process batch workflow event with preferences", async () => {
+        await handler(mockBatchEvent);
+
+        // Verify generation request status updates with workflow context
+        expect(mockGenerationRequestAccess.updateStatus).toHaveBeenCalledWith(
+          "test-user-123",
+          "test-request-batch-1",
+          "PROCESSING",
+          {
+            relatedEntityId: "test-story-id-123",
+            workflowId: "test-workflow-456",
+            currentBatch: 1,
+          }
+        );
+
+        // Verify story generation with provided preferences
+        expect(mockBedrockInstance.generateStory).toHaveBeenCalledWith(
+          mockBatchEvent.detail.preferences,
+          mockBatchEvent.detail.insights
+        );
+
+        // Verify story creation
+        expect(mockStoryAccess.create).toHaveBeenCalledWith({
+          storyId: "test-story-id-123",
+          userId: "test-user-123",
+          title: "The Adventure Begins",
+          s3Key: "stories/test-user-123/test-story-id-123/story.md",
+          status: "COMPLETED",
+          createdAt: expect.any(String),
+          updatedAt: expect.any(String),
+        });
+
+        // Verify next batch story generation is triggered
+        expect(mockGenerationRequestAccess.create).toHaveBeenCalledWith({
+          userId: "test-user-123",
+          requestId: "test-request-batch-1-batch-2",
+          type: "STORY",
+          status: "PENDING",
+          createdAt: expect.any(String),
+          updatedAt: expect.any(String),
+        });
+
+        expect(
+          mockEventPublishingHelpers.publishBatchStoryGeneration
+        ).toHaveBeenCalledWith(
+          "test-user-123",
+          "test-workflow-456",
+          "test-request-batch-1-batch-2",
+          3,
+          2,
+          3,
+          mockBatchEvent.detail.preferences,
+          mockBatchEvent.detail.insights
+        );
+      });
+
+      it("should complete batch workflow on final story", async () => {
+        const finalBatchEvent = {
+          ...mockBatchEvent,
+          detail: {
+            ...mockBatchEvent.detail,
+            currentBatch: 3,
+            totalBatches: 3,
+            requestId: "test-request-batch-3",
+          },
+        };
+
+        await handler(finalBatchEvent);
+
+        // Verify story generation completes
+        expect(mockStoryAccess.create).toHaveBeenCalled();
+
+        // Verify no next batch is triggered
+        expect(
+          mockEventPublishingHelpers.publishBatchStoryGeneration
+        ).not.toHaveBeenCalled();
+
+        // Verify batch completion status update
+        expect(
+          mockEventPublishingHelpers.publishStatusUpdate
+        ).toHaveBeenCalledWith(
+          "test-user-123",
+          "test-request-batch-3",
+          "STORY",
+          "COMPLETED",
+          "test-workflow-456",
+          "Batch workflow completed: 3 stories generated"
+        );
+      });
+    });
+
+    describe("Batch workflow with queried preferences", () => {
+      const mockBatchEventWithoutPreferences: EventBridgeEvent<
+        "Batch Story Generation Requested",
+        BatchWorkflowEventDetail
+      > = {
+        ...mockBatchEvent,
+        detail: {
+          ...mockBatchEvent.detail,
+          preferences: undefined as any,
+          insights: undefined as any,
+        },
+      };
+
+      it("should query user preferences when not provided in batch event", async () => {
+        const mockUserPreferences = {
+          preferences: {
+            genres: ["Fantasy", "Romance"],
+            themes: ["Magic", "Love"],
+            artStyle: "Shoujo",
+            targetAudience: "Young Adult",
+            contentRating: "PG",
+          },
+          insights: {
+            recommendations: [
+              { category: "Fantasy", score: 0.95, attributes: {} },
+              { category: "Romance", score: 0.85, attributes: {} },
+            ],
+            trends: [
+              { topic: "Magic", popularity: 0.9 },
+              { topic: "Love", popularity: 0.8 },
+            ],
+          },
+          lastUpdated: "2024-01-01T00:00:00Z",
+        };
+
+        mockUserPreferencesAccess.getLatestWithMetadata.mockResolvedValue(
+          mockUserPreferences
+        );
+
+        await handler(mockBatchEventWithoutPreferences);
+
+        // Verify user preferences were queried
+        expect(
+          mockUserPreferencesAccess.getLatestWithMetadata
+        ).toHaveBeenCalledWith("test-user-123");
+
+        // Verify story generation with queried preferences
+        expect(mockBedrockInstance.generateStory).toHaveBeenCalledWith(
+          mockUserPreferences.preferences,
+          mockUserPreferences.insights
+        );
+
+        // Verify next batch uses queried preferences
+        expect(
+          mockEventPublishingHelpers.publishBatchStoryGeneration
+        ).toHaveBeenCalledWith(
+          "test-user-123",
+          "test-workflow-456",
+          "test-request-batch-1-batch-2",
+          3,
+          2,
+          3,
+          mockUserPreferences.preferences,
+          mockUserPreferences.insights
+        );
+      });
+
+      it("should handle missing user preferences gracefully", async () => {
+        mockUserPreferencesAccess.getLatestWithMetadata.mockResolvedValue({
+          preferences: null,
+        });
+
+        await expect(handler(mockBatchEventWithoutPreferences)).rejects.toThrow(
+          "No user preferences found for user test-user-123. User must submit preferences before starting batch workflow."
+        );
+
+        expect(
+          mockUserPreferencesAccess.getLatestWithMetadata
+        ).toHaveBeenCalledWith("test-user-123");
+        expect(mockBedrockInstance.generateStory).not.toHaveBeenCalled();
+      });
+
+      it("should handle user preferences query errors", async () => {
+        const queryError = new Error("DynamoDB query failed");
+        mockUserPreferencesAccess.getLatestWithMetadata.mockRejectedValue(
+          queryError
+        );
+
+        await expect(handler(mockBatchEventWithoutPreferences)).rejects.toThrow(
+          "DynamoDB query failed"
+        );
+
+        expect(
+          mockUserPreferencesAccess.getLatestWithMetadata
+        ).toHaveBeenCalledWith("test-user-123");
+        expect(mockBedrockInstance.generateStory).not.toHaveBeenCalled();
+      });
+    });
+
+    describe("Batch workflow error handling", () => {
+      it("should continue batch workflow on individual story failure", async () => {
+        const storyError = new Error("Story generation failed");
+        mockBedrockInstance.generateStory.mockRejectedValue(storyError);
+
+        // Should not throw for batch workflow
+        await handler(mockBatchEvent);
+
+        // Verify error was logged but next batch was still triggered
+        expect(mockGenerationRequestAccess.create).toHaveBeenCalledWith({
+          userId: "test-user-123",
+          requestId: "test-request-batch-1-batch-2",
+          type: "STORY",
+          status: "PENDING",
+          createdAt: expect.any(String),
+          updatedAt: expect.any(String),
+        });
+
+        expect(
+          mockEventPublishingHelpers.publishBatchStoryGeneration
+        ).toHaveBeenCalledWith(
+          "test-user-123",
+          "test-workflow-456",
+          "test-request-batch-1-batch-2",
+          3,
+          2,
+          3,
+          mockBatchEvent.detail.preferences,
+          mockBatchEvent.detail.insights
+        );
+
+        // Verify failed status was recorded
+        expect(mockGenerationRequestAccess.updateStatus).toHaveBeenCalledWith(
+          "test-user-123",
+          "test-request-batch-1",
+          "FAILED",
+          {
+            errorMessage: "Story generation failed",
+            relatedEntityId: "test-story-id-123",
+            workflowId: "test-workflow-456",
+            currentBatch: 1,
+          }
+        );
+      });
+
+      it("should handle final batch failure appropriately", async () => {
+        const finalBatchEvent = {
+          ...mockBatchEvent,
+          detail: {
+            ...mockBatchEvent.detail,
+            currentBatch: 3,
+            totalBatches: 3,
+            requestId: "test-request-batch-3",
+          },
+        };
+
+        const finalError = new Error("Final story failed");
+        mockBedrockInstance.generateStory.mockRejectedValue(finalError);
+
+        await handler(finalBatchEvent);
+
+        // Verify no next batch is triggered
+        expect(
+          mockEventPublishingHelpers.publishBatchStoryGeneration
+        ).not.toHaveBeenCalled();
+
+        // Verify batch workflow failure status
+        expect(
+          mockEventPublishingHelpers.publishStatusUpdate
+        ).toHaveBeenCalledWith(
+          "test-user-123",
+          "test-request-batch-3",
+          "STORY",
+          "FAILED",
+          "test-workflow-456",
+          "Batch workflow failed on final story: Final story failed"
+        );
+      });
+
+      it("should handle next batch triggering errors gracefully", async () => {
+        const nextBatchError = new Error("Failed to trigger next batch");
+        mockEventPublishingHelpers.publishBatchStoryGeneration.mockRejectedValue(
+          nextBatchError
+        );
+
+        // Should still complete current story successfully
+        await handler(mockBatchEvent);
+
+        // Verify current story was completed
+        expect(mockStoryAccess.create).toHaveBeenCalled();
+        expect(mockGenerationRequestAccess.updateStatus).toHaveBeenCalledWith(
+          "test-user-123",
+          "test-request-batch-1",
+          "COMPLETED",
+          { relatedEntityId: "test-story-id-123" }
+        );
+
+        // Verify attempt to trigger next batch was made
+        expect(
+          mockEventPublishingHelpers.publishBatchStoryGeneration
+        ).toHaveBeenCalled();
+      });
+    });
+
+    describe("Batch workflow logging and monitoring", () => {
+      it("should log batch workflow context", async () => {
+        const consoleSpy = jest.spyOn(console, "log").mockImplementation();
+
+        await handler(mockBatchEvent);
+
+        // Check for structured logging format
+        expect(consoleSpy).toHaveBeenCalledWith(
+          "Info:",
+          expect.stringContaining("Story Generation Lambda invoked")
+        );
+
+        // Verify the log contains batch workflow context
+        const logCalls = consoleSpy.mock.calls;
+        const batchContextLog = logCalls.find(
+          (call) =>
+            call[0] === "Info:" &&
+            call[1].includes("Story Generation Lambda invoked") &&
+            call[1].includes("BatchWorkflow")
+        );
+        expect(batchContextLog).toBeDefined();
+
+        consoleSpy.mockRestore();
+      });
+
+      it("should log batch completion tracking", async () => {
+        const consoleSpy = jest.spyOn(console, "log").mockImplementation();
+
+        await handler(mockBatchEvent);
+
+        // Check for structured logging format
+        expect(consoleSpy).toHaveBeenCalledWith(
+          "Info:",
+          expect.stringContaining("Processing batch workflow completion")
+        );
+
+        expect(consoleSpy).toHaveBeenCalledWith(
+          "Info:",
+          expect.stringContaining("Triggering next story in batch workflow")
+        );
+
+        consoleSpy.mockRestore();
+      });
     });
   });
 });

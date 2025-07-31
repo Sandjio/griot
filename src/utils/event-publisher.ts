@@ -352,4 +352,39 @@ export const EventPublishingHelpers = {
       throw error;
     }
   },
+
+  /**
+   * Publish batch story generation event with error handling
+   */
+  async publishBatchStoryGeneration(
+    userId: string,
+    workflowId: string,
+    requestId: string,
+    numberOfStories: number,
+    currentBatch: number,
+    totalBatches: number,
+    preferences: any,
+    insights: any
+  ): Promise<void> {
+    try {
+      await eventPublisher.publishEvent({
+        source: "manga.workflow",
+        "detail-type": "Batch Story Generation Requested",
+        detail: {
+          userId,
+          workflowId,
+          requestId,
+          numberOfStories,
+          currentBatch,
+          totalBatches,
+          preferences,
+          insights,
+          timestamp: new Date().toISOString(),
+        },
+      });
+    } catch (error) {
+      console.error("Failed to publish batch story generation event:", error);
+      throw error;
+    }
+  },
 };
