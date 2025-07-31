@@ -15,7 +15,17 @@
     "validate:deployment": "cd griot-infra && ./scripts/deployment-validation.sh",
     "test:all": "cd griot-infra && ./scripts/run-tests.sh all",
     "test:integration": "cd griot-infra && ./scripts/run-tests.sh integration",
-    "test:load": "cd griot-infra && ./scripts/run-tests.sh load"
+    "test:load": "cd griot-infra && ./scripts/run-tests.sh load",
+    "test:workflow": "./scripts/run-workflow-tests.sh all",
+    "test:workflow:unit": "./scripts/run-workflow-tests.sh unit",
+    "test:workflow:integration": "./scripts/run-workflow-tests.sh integration",
+    "test:workflow:performance": "./scripts/run-workflow-tests.sh performance",
+    "test:workflow:batch": "./scripts/run-workflow-tests.sh batch-integration",
+    "test:workflow:continue": "./scripts/run-workflow-tests.sh continue-integration",
+    "test:workflow:load": "./scripts/run-workflow-tests.sh load",
+    "test:workflow:errors": "./scripts/run-workflow-tests.sh error-scenarios",
+    "test:workflow:e2e": "./scripts/run-workflow-tests.sh e2e",
+    "test:workflow:story-perf": "./scripts/run-workflow-tests.sh story-performance"
   },
   "repository": {
     "type": "git",
