@@ -266,6 +266,9 @@ const handleWorkflowStart = async (
     const requestId = uuidv4();
     const timestamp = new Date().toISOString();
 
+    // Calculate total batches (for sequential processing, this is numberOfStories)
+    const totalBatches = Math.ceil(numberOfStories / batchSize);
+
     // Add workflow context to X-Ray
     subsegment?.addAnnotation("workflowId", workflowId);
     subsegment?.addAnnotation("numberOfStories", numberOfStories);
@@ -309,9 +312,6 @@ const handleWorkflowStart = async (
       relatedEntityId: workflowId,
     });
     const createRequestDuration = createRequestTimer.stop();
-
-    // Calculate total batches (for sequential processing, this is numberOfStories)
-    const totalBatches = Math.ceil(numberOfStories / batchSize);
 
     // Publish batch workflow event to start the first batch
     const eventPublisher = new EventPublisher();

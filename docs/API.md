@@ -6,6 +6,8 @@ This document provides comprehensive documentation for the Griot API endpoints.
 
 - [Authentication](#authentication)
 - [Preferences API](#preferences-api)
+- [Workflow API](#workflow-api)
+- [Status API](#status-api)
 - [Error Handling](#error-handling)
 - [Response Formats](#response-formats)
 
@@ -176,6 +178,275 @@ Authorization: Bearer <jwt-token>
 - **401 Unauthorized**: Missing or invalid authentication
 - **500 Internal Server Error**: Server error during retrieval
 
+## Workflow API
+
+The Workflow API allows users to initiate batch manga generation workflows.
+
+### Base URL
+
+```
+https://api.griot.example.com/workflow
+```
+
+### Endpoints
+
+#### POST /workflow/start
+
+Start a batch manga generation workflow that creates multiple stories sequentially.
+
+**Prerequisites:**
+
+- User must have submitted preferences via POST /preferences
+- User must be authenticated with valid JWT token
+
+**Request:**
+
+```http
+POST /workflow/start
+Content-Type: application/json
+Authorization: Bearer <jwt-token>
+
+{
+  "numberOfStories": 3,
+  "batchSize": 1
+}
+```
+
+**Request Body Schema:**
+
+| Field             | Type   | Required | Description                                   | Valid Values |
+| ----------------- | ------ | -------- | --------------------------------------------- | ------------ |
+| `numberOfStories` | number | Yes      | Number of stories to generate (1-10)          | 1-10         |
+| `batchSize`       | number | No       | Stories per batch (default: 1 for sequential) | 1-5          |
+
+**Success Response (202 Accepted):**
+
+```json
+{
+  "workflowId": "wf-abc123-def456",
+  "requestId": "req-789ghi-jkl012",
+  "numberOfStories": 3,
+  "status": "STARTED",
+  "estimatedCompletionTime": "2023-01-01T12:09:00.000Z",
+  "message": "Batch workflow started successfully",
+  "timestamp": "2023-01-01T12:00:00.000Z"
+}
+```
+
+**Error Responses:**
+
+- **400 Bad Request**: Invalid request body, validation errors, or missing user preferences
+- **401 Unauthorized**: Missing or invalid authentication
+- **429 Too Many Requests**: Rate limit exceeded (5 requests per 5 minutes)
+- **500 Internal Server Error**: Server error during workflow initiation
+
+**Rate Limiting:**
+
+- **Limit**: 5 workflow start requests per 5 minutes per user
+- **Response**: 429 Too Many Requests with `Retry-After: 300` header
+
+### Testing with Postman
+
+#### Setup Authentication
+
+1. **Get JWT Token**: First authenticate with Cognito User Pool to get a JWT token
+2. **Set Authorization Header**: In Postman, go to Authorization tab and select "Bearer Token"
+3. **Add Token**: Paste your JWT token in the Token field
+
+#### Test Workflow Start
+
+1. **Method**: POST
+2. **URL**: `https://your-api-gateway-url/dev/workflow/start`
+3. **Headers**:
+   ```
+   Content-Type: application/json
+   Authorization: Bearer <your-jwt-token>
+   ```
+4. **Body** (raw JSON):
+   ```json
+   {
+     "numberOfStories": 2,
+     "batchSize": 1
+   }
+   ```
+
+#### Expected Responses
+
+**Success (202 Accepted):**
+
+```json
+{
+  "workflowId": "wf-12345678-1234-1234-1234-123456789012",
+  "requestId": "req-87654321-4321-4321-4321-210987654321",
+  "numberOfStories": 2,
+  "status": "STARTED",
+  "estimatedCompletionTime": "2023-01-01T12:06:00.000Z",
+  "message": "Batch workflow started successfully",
+  "timestamp": "2023-01-01T12:00:00.000Z"
+}
+```
+
+**Error - Missing Preferences (400 Bad Request):**
+
+```json
+{
+  "error": {
+    "code": "PREFERENCES_NOT_FOUND",
+    "message": "User preferences not found. Please submit preferences before starting workflow.",
+    "requestId": "req-error-123",
+    "timestamp": "2023-01-01T12:00:00.000Z"
+  }
+}
+```
+
+**Error - Rate Limited (429 Too Many Requests):**
+
+```json
+{
+  "error": {
+    "code": "RATE_LIMIT_EXCEEDED",
+    "message": "Too many workflow requests. Please try again later.",
+    "requestId": "req-error-456",
+    "timestamp": "2023-01-01T12:00:00.000Z"
+  }
+}
+```
+
+## Status API
+
+The Status API allows users to check the progress of their manga generation requests.
+
+### Base URL
+
+```
+https://api.griot.example.com/status
+```
+
+### Endpoints
+
+#### GET /status/{requestId}
+
+Check the status and progress of a manga generation request.
+
+**Request:**
+
+```http
+GET /status/{requestId}
+Authorization: Bearer <jwt-token>
+```
+
+**Path Parameters:**
+
+| Parameter   | Type   | Required | Description                           |
+| ----------- | ------ | -------- | ------------------------------------- |
+| `requestId` | string | Yes      | The request ID from workflow response |
+
+**Success Response (200 OK) - Story Generation:**
+
+```json
+{
+  "requestId": "req-789ghi-jkl012",
+  "status": "PROCESSING",
+  "type": "STORY",
+  "timestamp": "2023-01-01T12:02:00.000Z",
+  "progress": {
+    "currentStep": "Generating story content",
+    "totalSteps": 3,
+    "completedSteps": 1
+  },
+  "result": {
+    "storyId": "story-123abc-456def"
+  }
+}
+```
+
+**Success Response (200 OK) - Completed:**
+
+```json
+{
+  "requestId": "req-789ghi-jkl012",
+  "status": "COMPLETED",
+  "type": "STORY",
+  "timestamp": "2023-01-01T12:05:00.000Z",
+  "progress": {
+    "currentStep": "All episodes completed",
+    "totalSteps": 3,
+    "completedSteps": 3
+  },
+  "result": {
+    "storyId": "story-123abc-456def",
+    "downloadUrl": "/api/stories/story-123abc-456def/download"
+  }
+}
+```
+
+**Success Response (200 OK) - Failed:**
+
+```json
+{
+  "requestId": "req-789ghi-jkl012",
+  "status": "FAILED",
+  "type": "STORY",
+  "timestamp": "2023-01-01T12:03:00.000Z",
+  "error": "Generation failed due to external service error"
+}
+```
+
+**Error Responses:**
+
+- **400 Bad Request**: Missing or invalid request ID
+- **401 Unauthorized**: Missing or invalid authentication
+- **403 Forbidden**: Request belongs to different user
+- **404 Not Found**: Request ID not found
+- **500 Internal Server Error**: Server error during status retrieval
+
+### Testing with Postman
+
+#### Test Status Check
+
+1. **Method**: GET
+2. **URL**: `https://your-api-gateway-url/dev/status/{requestId}`
+   - Replace `{requestId}` with actual request ID from workflow start response
+3. **Headers**:
+   ```
+   Authorization: Bearer <your-jwt-token>
+   ```
+4. **No Body Required**
+
+#### Expected Responses
+
+**Success - In Progress:**
+
+```json
+{
+  "requestId": "req-87654321-4321-4321-4321-210987654321",
+  "status": "PROCESSING",
+  "type": "STORY",
+  "timestamp": "2023-01-01T12:02:30.000Z",
+  "progress": {
+    "currentStep": "Generating episodes (1/1)",
+    "totalSteps": 3,
+    "completedSteps": 2
+  },
+  "result": {
+    "storyId": "story-12345678-1234-1234-1234-123456789012"
+  }
+}
+```
+
+**Error - Not Found (404):**
+
+```json
+{
+  "error": {
+    "code": "REQUEST_NOT_FOUND",
+    "message": "Generation request not found",
+    "requestId": "api-request-123",
+    "timestamp": "2023-01-01T12:00:00.000Z"
+  }
+}
+```
+
 ## Error Handling
 
 All error responses follow a consistent format:
@@ -281,6 +552,25 @@ curl -X GET https://api.griot.example.com/preferences \
   -H "Authorization: Bearer <jwt-token>"
 ```
 
+3. **Start Workflow:**
+
+```bash
+curl -X POST https://api.griot.example.com/workflow/start \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <jwt-token>" \
+  -d '{
+    "numberOfStories": 2,
+    "batchSize": 1
+  }'
+```
+
+4. **Check Status:**
+
+```bash
+curl -X GET https://api.griot.example.com/status/req-789ghi-jkl012 \
+  -H "Authorization: Bearer <jwt-token>"
+```
+
 ### Error Handling Example
 
 ```javascript
@@ -310,7 +600,17 @@ async function submitPreferences(preferences) {
 
 ## Changelog
 
-### Version 2.0 (Current)
+### Version 3.0 (Current)
+
+- **Added**: POST /workflow/start endpoint for batch manga generation workflows
+- **Added**: GET /status/{requestId} endpoint for checking generation progress
+- **Added**: Rate limiting for workflow endpoints (5 requests per 5 minutes)
+- **Added**: Sequential story generation with progress tracking
+- **Added**: Comprehensive Postman testing documentation
+- **Improved**: Enhanced error responses with specific error codes
+- **Security**: Added workflow-specific authentication and authorization
+
+### Version 2.0
 
 - **Added**: GET /preferences endpoint for retrieving user preferences
 - **Changed**: POST /preferences no longer triggers manga generation workflows

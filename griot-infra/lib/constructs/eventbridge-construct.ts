@@ -67,8 +67,11 @@ export class EventBridgeConstruct extends Construct {
       ruleName: `manga-story-generation-rule-${props.environment}`,
       eventBus: props.eventBus,
       eventPattern: {
-        source: ["manga.preferences"],
-        detailType: ["Story Generation Requested"],
+        source: ["manga.preferences", "manga.workflow"],
+        detailType: [
+          "Story Generation Requested",
+          "Batch Story Generation Requested",
+        ],
       },
       description: "Route story generation events to Story Generation Lambda",
     });

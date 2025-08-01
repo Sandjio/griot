@@ -266,7 +266,7 @@
   - Configure X-Ray tracing for new workflow paths
   - _Requirements: 6A.5, 6B.6_
 
-- [ ] 30. Create comprehensive tests for batch and continue workflows
+- [-] 30. Create comprehensive tests for batch and continue workflows
   - Write integration tests for complete batch workflow
   - Implement tests for continue episode functionality
   - Create load tests for batch processing scenarios

@@ -90,7 +90,7 @@ export class MonitoringStack extends cdk.Stack {
 
     new xray.CfnSamplingRule(this, "EpisodeContinuationTracingRule", {
       samplingRule: {
-        ruleName: `manga-episode-continuation-tracing-${props.environment}`,
+        ruleName: `manga-episode-continuation-${props.environment}`,
         priority: 8100,
         fixedRate: 0.15, // 15% sampling rate for episode continuations
         reservoirSize: 1,
@@ -494,7 +494,10 @@ export class MonitoringStack extends cdk.Stack {
       ],
     });
 
-    this.dashboard.addWidgets(episodeContinuationWidget, episodePerformanceWidget);
+    this.dashboard.addWidgets(
+      episodeContinuationWidget,
+      episodePerformanceWidget
+    );
   }
 
   private createLambdaMetricsWidgets(props: MonitoringStackProps): void {
@@ -792,7 +795,8 @@ export class MonitoringStack extends cdk.Stack {
         }),
         threshold: 25, // 25% failure rate
         evaluationPeriods: 2,
-        comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+        comparisonOperator:
+          cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
         treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
       }
     );
@@ -811,7 +815,8 @@ export class MonitoringStack extends cdk.Stack {
         }),
         threshold: 1800000, // 30 minutes in milliseconds
         evaluationPeriods: 1,
-        comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+        comparisonOperator:
+          cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
       }
     );
 
@@ -847,7 +852,8 @@ export class MonitoringStack extends cdk.Stack {
         }),
         threshold: 15, // 15% failure rate
         evaluationPeriods: 2,
-        comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+        comparisonOperator:
+          cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
         treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
       }
     );
