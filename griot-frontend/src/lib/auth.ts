@@ -280,7 +280,7 @@ export class TokenManager {
     if (!tokens || !this.validateTokens(tokens)) {
       return null;
     }
-    return tokens.accessToken;
+    return tokens.idToken;
   }
 }
 
