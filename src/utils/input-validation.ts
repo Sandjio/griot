@@ -253,7 +253,9 @@ export function validateApiGatewayEvent(
 
     // Validate User-Agent header exists (basic bot protection)
     const userAgent =
-      event.headers["User-Agent"] || event.headers["user-agent"];
+      event.headers["User-Agent"] ||
+      event.headers["user-agent"] ||
+      event.requestContext?.identity?.userAgent;
     if (!userAgent) {
       errors.push("User-Agent header is required");
     }
@@ -502,4 +504,8 @@ export const SECURITY_HEADERS = {
   "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none';",
   "Referrer-Policy": "strict-origin-when-cross-origin",
   "Permissions-Policy": "geolocation=(), microphone=(), camera=()",
+  "Access-Control-Allow-Origin": "http://localhost:3000",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  "Access-Control-Max-Age": "86400",
 };

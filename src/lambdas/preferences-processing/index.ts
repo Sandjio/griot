@@ -159,6 +159,14 @@ const preferencesProcessingHandler = async (
         subsegment,
         correlationId
       );
+    } else if (event.httpMethod === "OPTIONS") {
+      return {
+        statusCode: HttpStatusCodes.OK,
+        headers: {
+          ...SECURITY_HEADERS,
+        },
+        body: "",
+      };
     } else {
       subsegment?.addError(
         new Error(`Unsupported HTTP method: ${event.httpMethod}`)
